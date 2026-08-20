@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include <hyprland/src/Compositor.hpp>
@@ -18,9 +19,27 @@
 struct HSCard {
     WORKSPACEID id = WORKSPACE_INVALID;
     PHLWORKSPACE workspace = nullptr;
-    CBox box; // global logical coords
     int index = 0;
     bool synthetic = false; // the trailing "drop here for a new workspace" card
+
+    // The row's band: full monitor width, one card tall. This is what the row *is* now that
+    // each tape slides underneath a stationary centre -- a viewport-shaped rectangle would have
+    // to travel with the tape, which is exactly what it must not do. Used for hit-testing and
+    // for the optional row background.
+    CBox box;
+
+    // The mapping this row draws under: a global-logical point p lands at
+    // (p - viewOrigin) * zoom + contentOrigin. viewOrigin is the tape coordinate parked at the
+    // centre of the screen (see HSView::anchorOffset); contentOrigin is where it lands.
+    Vector2D viewOrigin;
+    Vector2D contentOrigin;
+};
+
+// One column of the scroll tape: the windows that share an x, and where that column's centre
+// sits in global logical coords.
+struct HSColumn {
+    double centerX = 0.0;
+    std::vector<PHLWINDOW> windows;
 };
 
 // Everything geometric about one moment in time, computed once and passed around, so rendering
@@ -29,7 +48,6 @@ struct HSFrame {
     float progress = 0.F;
     float zoom = 1.F;
     CBox monitorBox;
-    Vector2D viewOrigin; // global logical point that maps to each card's top-left
     std::vector<HSCard> cards;
 
     const HSCard* card(WORKSPACEID id) const;
@@ -48,12 +66,12 @@ class HSView {
 
     PHLANIMVAR<float> m_progress; // 0 = desktop, 1 = fully zoomed out
     PHLANIMVAR<float> m_row;      // animated row index of the selected workspace
-    PHLANIMVAR<float> m_pan;      // manual horizontal pan along the tape, in workspace pixels
+    PHLANIMVAR<float> m_pan;      // manual horizontal pan, in workspace pixels
+    PHLANIMVAR<float> m_fitZoom;  // auto-fit target zoom, animated between workspaces
 
-    // Auto-fit, animated so that moving between workspaces with very different tape lengths
-    // eases rather than snaps.
-    PHLANIMVAR<float> m_fitZoom;
-    PHLANIMVAR<float> m_fitPan;
+    // How far the selected row's anchor column sits from the screen centre. Animated, so
+    // scrolling columns slides the tape through a stationary centre rather than jumping.
+    PHLANIMVAR<float> m_anchorX;
 
     WORKSPACEID m_selected = WORKSPACE_INVALID;
     PHLWINDOWREF m_hovered;
@@ -71,8 +89,7 @@ class HSView {
     void toggle();
     void onConfigReloaded();
 
-    // Navigation. selectRow moves between workspaces, selectColumn defers to the layout's own
-    // focus so it works with scrolling, dwindle and master alike.
+    // Navigation.
     void selectRow(int delta);
     void selectWorkspace(WORKSPACEID id);
     void selectColumn(int delta);
@@ -90,23 +107,34 @@ class HSView {
     std::optional<HSCard> cardAt(const Vector2D& global) const;
     PHLWINDOW windowAt(const Vector2D& global) const;
 
+    // The window the selected workspace is currently centred on -- what closing should focus.
+    PHLWINDOW selectedAnchor() const;
+
     void render();
 
   private:
     void renderCard(const HSCard& card, const HSFrame& frame, const Time::steady_tp& time);
-    void renderTopLayers(const Time::steady_tp& time);
+    void renderLayers(const Time::steady_tp& time, bool top);
     void postRender();
 
     std::vector<PHLWORKSPACE> visibleWorkspaces(WORKSPACEID& maxId) const;
     static std::vector<PHLWINDOW> workspaceWindows(PHLWORKSPACE workspace);
 
-    // Union of the monitor viewport and every window on the workspace, in global logical coords.
-    // Drives auto-fit: a tape longer than the screen makes the overview zoom out further instead
-    // of running off the edge.
-    CBox contentBounds(PHLWORKSPACE workspace, const CBox& monitorBox) const;
+    // The scroll tape as columns, left to right.
+    static std::vector<HSColumn> columnsOf(PHLWORKSPACE workspace);
 
-    // Recompute the auto-fit zoom and pan for the selected workspace. `warp` skips the animation,
-    // which is what opening the overview wants.
+    // The window each workspace is centred on. Captured when the overview opens -- the central
+    // column is where you *were*, not wherever focus drifts to afterwards.
+    std::unordered_map<WORKSPACEID, PHLWINDOWREF> m_anchors;
+
+    void captureAnchors();
+    PHLWINDOW anchorWindow(PHLWORKSPACE workspace) const;
+
+    // Signed distance from the screen centre to the anchor column's centre, in workspace px.
+    // This is the only thing that moves when you scroll columns; the centre itself never does.
+    double anchorOffset(PHLWORKSPACE workspace) const;
+
+    // Auto-fit zoom for the selected workspace, keeping its anchor column centred.
     void updateFit(bool warp);
 
     int rowIndexOf(WORKSPACEID id, const std::vector<HSCard>& cards) const;

@@ -96,7 +96,8 @@ DISPATCHER(select) {
     if (!view || !view->m_active)
         return {.success = false, .error = "overview is not open"};
 
-    view->hide(view->m_hovered.lock());
+    const auto hovered = view->m_hovered.lock();
+    view->hide(hovered ? hovered : view->selectedAnchor());
     return {};
 }
 
@@ -398,10 +399,10 @@ static void init_config() {
     ADD_CONFIG(CIntValue, "fit_rows", "also zoom out until every workspace row fits on screen", 0);
 
     // Appearance
-    ADD_CONFIG(CColorValue, "backdrop_color", "colour behind everything", 0xFF262626);
+    ADD_CONFIG(CColorValue, "backdrop_color", "wallpaper dim, and the opaque base when background layers are off", 0xCC16161E);
     ADD_CONFIG(CColorValue, "card_color", "per-workspace backdrop; alpha 0 disables it", 0x00000000);
-    ADD_CONFIG(CIntValue, "render_layers", "draw background/bottom layer surfaces inside each workspace", 1);
-    ADD_CONFIG(CIntValue, "render_top_layers", "keep top/overlay layer surfaces (bars) drawn over the overview", 1);
+    ADD_CONFIG(CIntValue, "render_background_layers", "draw background/bottom layer surfaces (your wallpaper), unscaled and unmoved", 1);
+    ADD_CONFIG(CIntValue, "render_top_layers", "draw top/overlay layer surfaces (your bar), unscaled and unmoved", 1);
     ADD_CONFIG(CFloatValue, "active_border_size", "border around the selected workspace, 0 to disable", 2.F);
     ADD_CONFIG(CColorValue, "active_border_color", "border colour for the selected workspace", 0xFF3399FF);
     ADD_CONFIG(CFloatValue, "hover_border_size", "border around the hovered window, 0 to disable", 3.F);

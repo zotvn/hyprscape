@@ -166,11 +166,11 @@ you everything instead of running off the bezel. Turn it off for niri's fixed-zo
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `backdrop_color` | `rgba(262626ff)` | fills the screen behind everything |
-| `card_color` | `rgba(00000000)` | per-workspace backdrop; transparent by default because the wallpaper already fills each card |
-| `render_layers` | `1` | draw background/bottom layer surfaces (your wallpaper) inside each card |
-| `render_top_layers` | `1` | keep top/overlay layer surfaces (your bar) drawn over the overview, unscaled |
-| `active_border_size` | `2` | ring around the selected workspace; `0` disables |
+| `backdrop_color` | `rgba(16161ecc)` | dims the wallpaper as the overview opens, and is the opaque base when background layers are off. Its alpha is faded in with the animation, so at rest it changes nothing. |
+| `card_color` | `rgba(00000000)` | optional band behind each workspace row, full output width |
+| `render_background_layers` | `1` | draw background/bottom layer surfaces (your wallpaper) — unscaled and unmoved, as a backdrop |
+| `render_top_layers` | `1` | draw top/overlay layer surfaces (your bar) — unscaled and unmoved, over everything |
+| `active_border_size` | `2` | ring around the centred window of the selected row — what closing will focus; `0` disables |
 | `active_border_color` | `rgba(3399ffff)` | its colour |
 | `hover_border_size` | `3` | ring around the hovered window; `0` disables |
 | `hover_border_color` | `rgba(88bbffff)` | its colour |

@@ -187,7 +187,11 @@ bool HSManager::onKey(const IKeyboard::SKeyEvent& event) {
     // (including whatever toggles the overview) keep working.
     switch (event.keycode) {
         case KEY_ESC: view->hide(nullptr); return true;
-        case KEY_ENTER: view->hide(view->m_hovered.lock()); return true;
+        case KEY_ENTER: {
+            const auto hovered = view->m_hovered.lock();
+            view->hide(hovered ? hovered : view->selectedAnchor());
+            return true;
+        }
         case KEY_UP:
         case KEY_K: view->selectRow(-1); return true;
         case KEY_DOWN:
