@@ -62,6 +62,8 @@ HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
     g_pAnimationManager->createAnimation(0.F, m_progress, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(0.F, m_fitPan, cfg, AVARDAMAGE_NONE);
 }
 
 PHLMONITOR HSView::monitor() const {
@@ -130,13 +132,13 @@ std::vector<PHLWINDOW> HSView::workspaceWindows(PHLWORKSPACE workspace) {
     return out;
 }
 
-CBox HSView::contentBounds(const std::vector<PHLWORKSPACE>& workspaces, const CBox& monitorBox) const {
+CBox HSView::contentBounds(PHLWORKSPACE workspace, const CBox& monitorBox) const {
     // Start from the viewport so a workspace whose windows all fit behaves exactly like niri.
     double left = monitorBox.x, right = monitorBox.x + monitorBox.w;
 
-    for (const auto& ws : workspaces) {
-        const Vector2D offset = hs_workspace_render_offset(ws);
-        for (const auto& w : workspaceWindows(ws)) {
+    if (workspace) {
+        const Vector2D offset = hs_workspace_render_offset(workspace);
+        for (const auto& w : workspaceWindows(workspace)) {
             const Vector2D pos = hs_window_render_pos(w) - offset;
             left = std::min(left, pos.x);
             right = std::max(right, pos.x + w->m_realSize->value().x);
@@ -144,6 +146,46 @@ CBox HSView::contentBounds(const std::vector<PHLWORKSPACE>& workspaces, const CB
     }
 
     return CBox {left, monitorBox.y, right - left, monitorBox.h};
+}
+
+void HSView::updateFit(bool warp) {
+    const auto monitor = this->monitor();
+    if (!monitor)
+        return;
+
+    const CBox mbox = monitor->logicalBox();
+    float target = std::clamp(HSConfig::value<Config::FLOAT>("zoom"), 0.05F, 0.95F);
+    float pan = 0.F;
+
+    // Fit the workspace you are actually looking at. Fitting the union of every workspace would
+    // let one very long tape shrink all the others into illegibility.
+    if (HSConfig::value<Config::INTEGER>("auto_fit")) {
+        const CBox bounds = contentBounds(g_pCompositor->getWorkspaceByID(m_selected), mbox);
+        if (bounds.w > mbox.w) {
+            const float minZoom = std::clamp(HSConfig::value<Config::FLOAT>("min_zoom"), 0.02F, 0.95F);
+            target = std::clamp((float)(mbox.w / bounds.w), minZoom, target);
+
+            // Recentre on the content, or a tape that grew to the left sits half off-screen even
+            // after zooming out.
+            pan = (float)((bounds.x + bounds.w / 2.0) - (mbox.x + mbox.w / 2.0));
+        }
+    }
+
+    if (HSConfig::value<Config::INTEGER>("fit_rows")) {
+        WORKSPACEID maxId = 0;
+        const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
+        const float rows = (float)std::max<size_t>(visibleWorkspaces(maxId).size(), 1);
+        if (rows > 1.F)
+            target = std::min(target, 1.F / (rows + (rows - 1.F) * gapFactor));
+    }
+
+    if (warp) {
+        m_fitZoom->setValueAndWarp(target);
+        m_fitPan->setValueAndWarp(pan);
+    } else {
+        *m_fitZoom = target;
+        *m_fitPan = pan;
+    }
 }
 
 HSFrame HSView::frame() const {
@@ -157,10 +199,8 @@ HSFrame HSView::frame() const {
     f.monitorBox = monitor->logicalBox();
 
     WORKSPACEID maxId = 0;
-    const auto workspaces = visibleWorkspaces(maxId);
-
     // Rows, in workspace-id order.
-    for (const auto& ws : workspaces)
+    for (const auto& ws : visibleWorkspaces(maxId))
         f.cards.push_back({.id = ws->m_id, .workspace = ws, .box = {}, .index = (int)f.cards.size(), .synthetic = false});
 
     // niri always keeps one empty workspace at the bottom, which is what makes "drag a window
@@ -175,33 +215,13 @@ HSFrame HSView::frame() const {
         return f;
 
     const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
-    float target = std::clamp(HSConfig::value<Config::FLOAT>("zoom"), 0.05F, 0.95F);
-
-    // Auto-fit. A scrolling workspace routinely holds more columns than fit on screen, so a
-    // fixed zoom would leave half the tape past the bezel. Shrink until the whole thing fits.
-    const CBox bounds = contentBounds(workspaces, f.monitorBox);
-    double autoPan = 0.0;
-
-    if (HSConfig::value<Config::INTEGER>("auto_fit") && bounds.w > f.monitorBox.w) {
-        const float minZoom = std::clamp(HSConfig::value<Config::FLOAT>("min_zoom"), 0.02F, 0.95F);
-        target = std::clamp((float)(f.monitorBox.w / bounds.w), minZoom, target);
-
-        // Recentre on the content rather than on the viewport, or a tape that grew to the left
-        // would sit half off-screen even after zooming out.
-        autoPan = (bounds.x + bounds.w / 2.0) - (f.monitorBox.x + f.monitorBox.w / 2.0);
-    }
-
-    if (HSConfig::value<Config::INTEGER>("fit_rows") && f.cards.size() > 1) {
-        const float rows = (float)f.cards.size();
-        target = std::min(target, 1.F / (rows + (rows - 1.F) * gapFactor));
-    }
 
     // niri: zoom = 1 - progress * (1 - configured), so progress 0 is a pixel-exact desktop and
-    // opening the overview is literally a zoom-out.
-    f.zoom = std::max(1.F - f.progress * (1.F - target), 0.01F);
+    // opening the overview is literally a zoom-out. The target comes from updateFit().
+    f.zoom = std::max(1.F - f.progress * (1.F - m_fitZoom->value()), 0.01F);
 
-    // The auto-pan has to fade in with the animation too, or the tape jumps sideways on open.
-    f.viewOrigin = f.monitorBox.pos() + Vector2D {autoPan * f.progress + (double)m_pan->value(), 0.0};
+    // The auto-pan fades in with the animation too, or the tape jumps sideways on open.
+    f.viewOrigin = f.monitorBox.pos() + Vector2D {(double)(m_fitPan->value() * f.progress + m_pan->value()), 0.0};
 
     const float cardW = f.monitorBox.w * f.zoom;
     const float cardH = f.monitorBox.h * f.zoom;
@@ -280,6 +300,7 @@ void HSView::show() {
     if (stale) {
         syncSelectionToMonitor();
         m_pan->setValueAndWarp(0.F);
+        updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
     }
 
@@ -363,6 +384,7 @@ void HSView::selectWorkspace(WORKSPACEID id) {
         return;
 
     m_selected = id;
+    updateFit(false);
     *m_row = (float)rowIndexOf(id, frame().cards);
 
     if (const auto monitor = this->monitor()) {
@@ -454,6 +476,10 @@ void HSView::render() {
         return;
 
     CScopeGuard guard([this] { postRender(); });
+
+    // Windows move while the overview is open (drags, new clients), so re-derive the fit each
+    // frame; the animated variables absorb it smoothly.
+    updateFit(false);
 
     const auto time = Time::steadyNow();
     const auto f = frame();

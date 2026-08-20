@@ -155,7 +155,7 @@ All keys live under `plugin:hyprscape:`.
 | --- | --- | --- |
 | `zoom` | `0.5` | how far to zoom out; a workspace card is this fraction of the monitor. niri's default. |
 | `workspace_gap` | `0.1` | vertical gap between rows, as a fraction of monitor height (scaled with the zoom, as in niri) |
-| `auto_fit` | `1` | if a tape is wider than the screen even at `zoom`, keep zooming out until it fits, and recentre on the content |
+| `auto_fit` | `1` | if the **selected** workspace's tape is wider than the screen even at `zoom`, keep zooming out until it fits, and recentre on the content. Animated, so moving between workspaces with very different tape lengths eases rather than snaps. |
 | `min_zoom` | `0.12` | the floor `auto_fit` will not go below |
 | `fit_rows` | `0` | also zoom out until *every* workspace row fits on screen at once |
 

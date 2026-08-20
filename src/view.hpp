@@ -50,6 +50,11 @@ class HSView {
     PHLANIMVAR<float> m_row;      // animated row index of the selected workspace
     PHLANIMVAR<float> m_pan;      // manual horizontal pan along the tape, in workspace pixels
 
+    // Auto-fit, animated so that moving between workspaces with very different tape lengths
+    // eases rather than snaps.
+    PHLANIMVAR<float> m_fitZoom;
+    PHLANIMVAR<float> m_fitPan;
+
     WORKSPACEID m_selected = WORKSPACE_INVALID;
     PHLWINDOWREF m_hovered;
 
@@ -95,10 +100,14 @@ class HSView {
     std::vector<PHLWORKSPACE> visibleWorkspaces(WORKSPACEID& maxId) const;
     static std::vector<PHLWINDOW> workspaceWindows(PHLWORKSPACE workspace);
 
-    // Union of the monitor viewport and every window on the given workspaces, in global logical
-    // coords. Drives auto-fit: a tape longer than the screen makes the overview zoom out further
-    // instead of running off the edge.
-    CBox contentBounds(const std::vector<PHLWORKSPACE>& workspaces, const CBox& monitorBox) const;
+    // Union of the monitor viewport and every window on the workspace, in global logical coords.
+    // Drives auto-fit: a tape longer than the screen makes the overview zoom out further instead
+    // of running off the edge.
+    CBox contentBounds(PHLWORKSPACE workspace, const CBox& monitorBox) const;
+
+    // Recompute the auto-fit zoom and pan for the selected workspace. `warp` skips the animation,
+    // which is what opening the overview wants.
+    void updateFit(bool warp);
 
     int rowIndexOf(WORKSPACEID id, const std::vector<HSCard>& cards) const;
     void syncSelectionToMonitor();
