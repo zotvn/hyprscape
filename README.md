@@ -134,6 +134,10 @@ bind = SUPER, U, hyprscape:toggle, all
 | arrows / `hjkl` | navigate rows and columns |
 | four-finger swipe up | open, continuously, tracking the swipe |
 
+The view follows the compositor, not just its own navigation: switch workspace with your own bind
+while the overview is open and the rows scroll to centre it. The selected row is always the one in
+the middle.
+
 Navigating the overview really navigates: the compositor switches workspace and moves focus along
 with you. So every bind you already have — close the window, move it to workspace 3, swap columns —
 acts on whatever is in the centre, not on whatever was focused before you opened the overview.
@@ -167,7 +171,7 @@ All keys live under `plugin:hyprscape:`.
 | `workspace_gap` | `0.1` | vertical gap between rows, as a fraction of monitor height (scaled with the zoom, as in niri) |
 | `auto_fit` | `1` | `0` — always use `zoom`. `1` — pick **one** zoom when the overview opens, tight enough that the most demanding workspace fits with its anchor centred, and hold it for the whole session. `2` — re-fit for whichever workspace is selected, so the zoom changes as you move between rows. |
 | `min_zoom` | `0.12` | the floor `auto_fit` will not go below |
-| `fit_rows` | `0` | also zoom out until *every* workspace row fits on screen at once |
+| `fit_rows` | `0` | also zoom out until *every* workspace row fits on screen at once. Worth turning on if you keep many workspaces and would rather see all of them than see any of them clearly. |
 
 `auto_fit` matters for long tapes: at mode `1` "show me everything" actually shows you everything
 instead of running off the bezel, and the zoom stays put while you navigate. Set it to `0` for
@@ -178,7 +182,8 @@ niri's strictly fixed zoom.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `backdrop_color` | `rgba(16161ecc)` | dims the wallpaper as the overview opens, and is the opaque base when background layers are off. Its alpha is faded in with the animation, so at rest it changes nothing. |
-| `card_color` | `rgba(00000000)` | optional band behind each workspace row, full output width |
+| `card_color` | `rgba(00000000)` | band behind every workspace row, full output width |
+| `active_row_color` | `rgba(ffffff14)` | band behind the *selected* row, so which workspace you are on is obvious at a glance |
 | `render_background_layers` | `1` | draw background/bottom layer surfaces (your wallpaper) — unscaled and unmoved, as a backdrop |
 | `render_top_layers` | `1` | draw top/overlay layer surfaces (your bar) — unscaled and unmoved, over everything |
 | `active_border_size` | `2` | ring around the centred window of the selected row — what closing will focus; `0` disables |

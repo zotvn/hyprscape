@@ -138,6 +138,10 @@ class HSView {
 
     int rowIndexOf(WORKSPACEID id, const std::vector<HSCard>& cards) const;
     void syncSelectionToMonitor();
+
+    // Follow the compositor and keep the selected row centred. Runs every frame, because the
+    // workspace can change from outside the overview and rows can appear or disappear under it.
+    void syncRow();
 };
 
 typedef SP<HSView> PHSVIEW;

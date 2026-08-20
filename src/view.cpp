@@ -261,6 +261,27 @@ double HSView::requiredZoom(PHLWORKSPACE workspace, const CBox& monitorBox) cons
     return (monitorBox.w / 2.0) / halfSpan;
 }
 
+void HSView::syncRow() {
+    const auto monitor = this->monitor();
+    if (!monitor || m_closing)
+        return;
+
+    // The user's own binds keep working while the overview is open, so a workspace switch can
+    // arrive from outside it -- SUPER+3, a focus dispatcher, an IPC call. Adopt it, or the view
+    // stays parked on the row it opened at while focus wanders off the bottom of the screen.
+    if (const auto active = monitor->m_activeWorkspace; active && active->m_id != m_selected) {
+        m_selected = active->m_id;
+        m_pan->setValueAndWarp(0.F);
+    }
+
+    // Re-target every frame rather than only on navigation: a workspace appearing or being
+    // destroyed shifts every row index below it, which would otherwise leave the selected row
+    // sitting at someone else's position.
+    const float target = (float)rowIndexOf(m_selected, frame().cards);
+    if (std::abs(m_row->goal() - target) > 0.001F)
+        *m_row = target;
+}
+
 void HSView::updateFit(bool warp) {
     const auto monitor = this->monitor();
     if (!monitor)
@@ -628,6 +649,7 @@ void HSView::render() {
     // Windows move while the overview is open (drags, new clients), so re-derive the fit each
     // frame; the animated variable absorbs it smoothly.
     updateFit(false);
+    syncRow();
 
     const auto time = Time::steadyNow();
     const auto f = frame();
@@ -718,10 +740,18 @@ void HSView::renderCard(const HSCard& card, const HSFrame& f, const Time::steady
     if (!monitor)
         return;
 
-    const auto cardColor = colorOf("card_color");
-    if (cardColor.a > 0.001) {
+    for (const auto& key : {"card_color", "active_row_color"}) {
+        // The second band marks the selected row. Without it the only cue for "which workspace
+        // am I on" is the focus ring on one window, which is easy to lose among six rows.
+        if (key == std::string_view {"active_row_color"} && card.id != m_selected)
+            continue;
+
+        const auto color = colorOf(key);
+        if (color.a <= 0.001)
+            continue;
+
         CRectPassElement::SRectData rect;
-        rect.color = fade(cardColor, f.progress);
+        rect.color = fade(color, f.progress);
         rect.box = toBuffer(monitor, card.box);
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(rect));
     }

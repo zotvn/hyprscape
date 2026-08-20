@@ -418,7 +418,8 @@ static void init_config() {
 
     // Appearance
     ADD_CONFIG(CColorValue, "backdrop_color", "wallpaper dim, and the opaque base when background layers are off", 0xCC16161E);
-    ADD_CONFIG(CColorValue, "card_color", "per-workspace backdrop; alpha 0 disables it", 0x00000000);
+    ADD_CONFIG(CColorValue, "card_color", "band behind every workspace row, full output width; alpha 0 disables it", 0x00000000);
+    ADD_CONFIG(CColorValue, "active_row_color", "band behind the selected workspace row, so it is obvious which one you are on", 0x14FFFFFF);
     ADD_CONFIG(CIntValue, "render_background_layers", "draw background/bottom layer surfaces (your wallpaper), unscaled and unmoved", 1);
     ADD_CONFIG(CIntValue, "render_top_layers", "draw top/overlay layer surfaces (your bar), unscaled and unmoved", 1);
     ADD_CONFIG(CFloatValue, "active_border_size", "border around the selected workspace, 0 to disable", 2.F);
