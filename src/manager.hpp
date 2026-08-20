@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <hyprland/src/devices/IKeyboard.hpp>
@@ -41,7 +42,11 @@ class HSManager {
   private:
     void updateHover();
 
-    bool m_shiftHeld = false;
+    // Held modifier keycodes. The overview only claims a key when nothing is held, so binds
+    // like SUPER+SHIFT+L keep reaching the user's own config.
+    std::unordered_set<uint32_t> m_modsHeld;
+    bool shiftHeld() const;
+    bool anyModHeld() const;
 
     bool m_buttonDown = false;
     bool m_dragging = false;

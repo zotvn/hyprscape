@@ -67,11 +67,7 @@ class HSView {
     PHLANIMVAR<float> m_progress; // 0 = desktop, 1 = fully zoomed out
     PHLANIMVAR<float> m_row;      // animated row index of the selected workspace
     PHLANIMVAR<float> m_pan;      // manual horizontal pan, in workspace pixels
-    PHLANIMVAR<float> m_fitZoom;  // auto-fit target zoom, animated between workspaces
-
-    // How far the selected row's anchor column sits from the screen centre. Animated, so
-    // scrolling columns slides the tape through a stationary centre rather than jumping.
-    PHLANIMVAR<float> m_anchorX;
+    PHLANIMVAR<float> m_fitZoom;  // the zoom the overview settles at, fixed for the session
 
     WORKSPACEID m_selected = WORKSPACE_INVALID;
     PHLWINDOWREF m_hovered;
@@ -123,18 +119,21 @@ class HSView {
     // The scroll tape as columns, left to right.
     static std::vector<HSColumn> columnsOf(PHLWORKSPACE workspace);
 
-    // The window each workspace is centred on. Captured when the overview opens -- the central
-    // column is where you *were*, not wherever focus drifts to afterwards.
-    std::unordered_map<WORKSPACEID, PHLWINDOWREF> m_anchors;
-
-    void captureAnchors();
+    // The window each workspace is centred on: whatever it has focused. Derived live rather
+    // than cached, so closing a window or any outside focus change re-centres by itself.
     PHLWINDOW anchorWindow(PHLWORKSPACE workspace) const;
+
+    // Focus a window for real, and switch to its workspace if needed. FOCUS_REASON_KEYBIND is
+    // load-bearing: the scrolling layout treats a CLICK focus as "only scroll if the pointer is
+    // already over the window", which can never hold for a zoomed-out copy of it.
+    void applySelection(PHLWINDOW window);
 
     // Signed distance from the screen centre to the anchor column's centre, in workspace px.
     // This is the only thing that moves when you scroll columns; the centre itself never does.
     double anchorOffset(PHLWORKSPACE workspace) const;
 
-    // Auto-fit zoom for the selected workspace, keeping its anchor column centred.
+    // Zoom at which a workspace fits entirely on screen with its anchor column centred.
+    double requiredZoom(PHLWORKSPACE workspace, const CBox& monitorBox) const;
     void updateFit(bool warp);
 
     int rowIndexOf(WORKSPACEID id, const std::vector<HSCard>& cards) const;

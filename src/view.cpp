@@ -10,6 +10,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
@@ -48,6 +49,10 @@ CHyprColor fade(CHyprColor c, float f) {
 // rounding from splitting a column in two.
 constexpr double COLUMN_EPS = 2.0;
 
+// Half-extent of the damage region we hand the render pass, in buffer pixels. Comfortably
+// larger than any scroll tape, and small enough that pixman's int32 arithmetic stays sane.
+constexpr int HS_DAMAGE_SLACK = 1 << 20;
+
 } // namespace
 
 const HSCard* HSFrame::card(WORKSPACEID id) const {
@@ -67,7 +72,6 @@ HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
     g_pAnimationManager->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
 }
 
 PHLMONITOR HSView::monitor() const {
@@ -173,13 +177,14 @@ PHLWINDOW HSView::anchorWindow(PHLWORKSPACE workspace) const {
     if (!workspace)
         return nullptr;
 
-    if (const auto it = m_anchors.find(workspace->m_id); it != m_anchors.end()) {
-        const auto w = it->second.lock();
-        if (w && w->m_workspace == workspace && w->m_isMapped && !w->m_isFloating)
-            return w;
-    }
+    // Whatever the compositor has focused here is the centre. Reading it live rather than
+    // caching it is what makes the view survive a window being closed underneath it: the layout
+    // picks a new focus, and the next frame re-centres on that instead of drifting off-screen.
+    const auto focused = Desktop::focusState()->window();
+    if (focused && focused->m_workspace == workspace && focused->m_isMapped && !focused->m_isFloating)
+        return focused;
 
-    if (const auto w = workspace->getLastFocusedWindow(); w && !w->m_isFloating)
+    if (const auto w = workspace->getLastFocusedWindow(); w && w->m_isMapped && !w->m_isFloating)
         return w;
 
     const auto columns = columnsOf(workspace);
@@ -201,18 +206,59 @@ double HSView::anchorOffset(PHLWORKSPACE workspace) const {
     return center - (mbox.x + mbox.w / 2.0);
 }
 
-void HSView::captureAnchors() {
-    m_anchors.clear();
+void HSView::applySelection(PHLWINDOW window) {
+    const auto monitor = this->monitor();
+    if (!monitor)
+        return;
 
-    WORKSPACEID maxId = 0;
-    for (const auto& ws : visibleWorkspaces(maxId)) {
-        if (const auto w = anchorWindow(ws))
-            m_anchors[ws->m_id] = w;
+    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+
+    // Navigating the overview really navigates: the compositor follows along, so every keybind
+    // the user already has -- close, move-to-workspace, swapcol -- acts on what they are looking
+    // at rather than on whatever was focused before the overview opened.
+    if (ws && monitor->m_activeWorkspace != ws) {
+        const auto outgoing = monitor->m_activeWorkspace;
+
+        // noMouseMove + noFocus: we place focus ourselves below, and a synthetic pointer move
+        // would land on a scaled-down copy of a window.
+        monitor->changeWorkspace(ws, false, true, true);
+
+        for (const auto& w : {outgoing, ws}) {
+            if (!w)
+                continue;
+            w->m_renderOffset->setValueAndWarp(Vector2D {0, 0});
+            w->m_alpha->setValueAndWarp(1.F);
+        }
     }
+
+    if (window && window->m_isMapped)
+        Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
 }
 
 PHLWINDOW HSView::selectedAnchor() const {
     return anchorWindow(g_pCompositor->getWorkspaceByID(m_selected));
+}
+
+// The zoom at which every window on `workspace` is on screen while its anchor column stays
+// pinned to the centre. Because the anchor is centred, the side that has to fit is the longer
+// one -- assuming the content is centred instead is what left the far end of a tape off-screen.
+double HSView::requiredZoom(PHLWORKSPACE workspace, const CBox& monitorBox) const {
+    if (!workspace)
+        return 1.0;
+
+    const Vector2D offset = hs_workspace_render_offset(workspace);
+    double left = monitorBox.x, right = monitorBox.x + monitorBox.w;
+
+    for (const auto& w : workspaceWindows(workspace)) {
+        const double x = hs_window_render_pos(w).x - offset.x;
+        left = std::min(left, x);
+        right = std::max(right, x + w->m_realSize->value().x);
+    }
+
+    const double anchorX = monitorBox.x + monitorBox.w / 2.0 + anchorOffset(workspace);
+    const double halfSpan = std::max({anchorX - left, right - anchorX, 1.0});
+
+    return (monitorBox.w / 2.0) / halfSpan;
 }
 
 void HSView::updateFit(bool warp) {
@@ -221,29 +267,27 @@ void HSView::updateFit(bool warp) {
         return;
 
     const CBox mbox = monitor->logicalBox();
-    float target = std::clamp(HSConfig::value<Config::FLOAT>("zoom"), 0.05F, 0.95F);
+    const float configured = std::clamp(HSConfig::value<Config::FLOAT>("zoom"), 0.05F, 0.95F);
+    const float minZoom = std::clamp(HSConfig::value<Config::FLOAT>("min_zoom"), 0.02F, 0.95F);
+    const auto mode = HSConfig::value<Config::INTEGER>("auto_fit");
 
-    // Fit the workspace you are actually looking at, keeping its anchor column dead centre.
-    // Fitting the union of every workspace would let one very long tape shrink all the others.
-    if (HSConfig::value<Config::INTEGER>("auto_fit")) {
-        const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    float target = configured;
 
-        double left = mbox.x, right = mbox.x + mbox.w;
-        if (ws) {
-            const Vector2D offset = hs_workspace_render_offset(ws);
-            for (const auto& w : workspaceWindows(ws)) {
-                const double x = hs_window_render_pos(w).x - offset.x;
-                left = std::min(left, x);
-                right = std::max(right, x + w->m_realSize->value().x);
-            }
-        }
+    if (mode == 1) {
+        // One zoom for the whole session, tight enough for the most demanding workspace. Only
+        // recomputed when the overview opens: a zoom that drifted while you navigated -- or
+        // every time a window closed -- made the overview feel like it was breathing at you.
+        if (!warp)
+            return;
 
-        // The anchor stays centred, so what has to fit is the larger of the two sides.
-        const double anchorTapeX = mbox.x + mbox.w / 2.0 + anchorOffset(ws);
-        const double halfSpan = std::max({anchorTapeX - left, right - anchorTapeX, 1.0});
+        WORKSPACEID maxId = 0;
+        for (const auto& ws : visibleWorkspaces(maxId))
+            target = std::min(target, (float)requiredZoom(ws, mbox));
 
-        const float minZoom = std::clamp(HSConfig::value<Config::FLOAT>("min_zoom"), 0.02F, 0.95F);
-        target = std::clamp((float)((mbox.w / 2.0) / halfSpan), minZoom, target);
+        target = std::clamp(target, minZoom, configured);
+    } else if (mode == 2) {
+        // Re-fit for whichever workspace is selected. Varies as you move between rows.
+        target = std::clamp((float)requiredZoom(g_pCompositor->getWorkspaceByID(m_selected), mbox), minZoom, configured);
     }
 
     if (HSConfig::value<Config::INTEGER>("fit_rows")) {
@@ -311,7 +355,9 @@ HSFrame HSView::frame() const {
         // The selected row's offset is animated; the others read straight off their anchor.
         // Fading the offset in with the progress keeps progress 0 an exact identity transform:
         // there viewOrigin is the monitor origin, zoom is 1 and contentOrigin is baseX == mbox.x.
-        double offset = c.id == m_selected ? (double)m_anchorX->value() + m_pan->value() : anchorOffset(c.workspace);
+        double offset = anchorOffset(c.workspace);
+        if (c.id == m_selected)
+            offset += m_pan->value();
 
         c.viewOrigin = {f.monitorBox.x + offset * f.progress, f.monitorBox.y};
     }
@@ -381,9 +427,7 @@ void HSView::show() {
 
     if (stale) {
         syncSelectionToMonitor();
-        captureAnchors();
         m_pan->setValueAndWarp(0.F);
-        m_anchorX->setValueAndWarp((float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected)));
         updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
     }
@@ -407,27 +451,12 @@ void HSView::hide(PHLWINDOW focusWindow) {
         target = g_pCompositor->createNewWorkspace(m_selected, monitor->m_id);
 
     // Closing commits the column you scrolled to, not just the workspace: whatever ended up in
-    // the centre is what you were pointing at.
+    // the centre is what you were pointing at. Navigation already moved the compositor along, so
+    // this is usually a no-op -- it matters when you click a window directly.
     if (!focusWindow)
         focusWindow = anchorWindow(target);
 
-    if (target && monitor->m_activeWorkspace != target) {
-        const auto outgoing = monitor->m_activeWorkspace;
-
-        monitor->changeWorkspace(target, false);
-
-        // changeWorkspace kicks off the usual slide/fade. Ours is a zoom, and two animations
-        // fighting over the same pixels looks broken -- squash theirs to its end state.
-        for (const auto& ws : {outgoing, target}) {
-            if (!ws)
-                continue;
-            ws->m_renderOffset->setValueAndWarp(Vector2D {0, 0});
-            ws->m_alpha->setValueAndWarp(1.F);
-        }
-    }
-
-    if (focusWindow && focusWindow->m_isMapped)
-        Desktop::focusState()->fullWindowFocus(focusWindow, Desktop::FOCUS_REASON_CLICK);
+    applySelection(focusWindow);
 
     if (HSConfig::value<Config::INTEGER>("warp_cursor") && focusWindow)
         focusWindow->warpCursor(false);
@@ -475,9 +504,7 @@ void HSView::selectWorkspace(WORKSPACEID id) {
     m_selected = id;
     m_pan->setValueAndWarp(0.F);
 
-    // Rows carry their own anchor, so switching rows warps rather than sliding sideways: the
-    // vertical move is the animation, and a diagonal drift on top of it reads as a glitch.
-    m_anchorX->setValueAndWarp((float)anchorOffset(g_pCompositor->getWorkspaceByID(id)));
+    applySelection(anchorWindow(g_pCompositor->getWorkspaceByID(id)));
 
     updateFit(false);
     *m_row = (float)rowIndexOf(id, frame().cards);
@@ -523,10 +550,10 @@ void HSView::selectColumn(int delta) {
     // Within a stacked column, keep whichever window was last focused there.
     const auto& target = columns[idx].windows;
     const auto lastFocused = ws->getLastFocusedWindow();
-    m_anchors[m_selected] = std::ranges::find(target, lastFocused) != target.end() ? lastFocused : target.front();
+    const auto pick = std::ranges::find(target, lastFocused) != target.end() ? lastFocused : target.front();
 
     m_pan->setValueAndWarp(0.F);
-    *m_anchorX = (float)anchorOffset(ws);
+    applySelection(pick);
     updateFit(false);
 
     if (const auto monitor = this->monitor()) {
@@ -581,8 +608,10 @@ void HSView::endDrag(const Vector2D& cursor) {
         g_pCompositor->moveWindowToWorkspaceSafe(window, workspace);
 
     // Dropping is also a choice of workspace and column: follow the window.
-    m_anchors[workspace->m_id] = window;
-    selectWorkspace(workspace->m_id);
+    m_selected = workspace->m_id;
+    applySelection(window);
+    updateFit(false);
+    *m_row = (float)rowIndexOf(m_selected, frame().cards);
 }
 
 void HSView::cancelDrag() {
@@ -602,6 +631,10 @@ void HSView::render() {
 
     const auto time = Time::steadyNow();
     const auto f = frame();
+
+    // Simplification decides what is occluded from untransformed boxes, which say nothing
+    // useful once every element is being moved by a modifier.
+    g_pHyprRenderer->m_renderData.noSimplify = true;
 
     // Opaque base, so nothing stale shows through when the layers below are disabled.
     CClearPassElement::SClearData clear;
@@ -722,6 +755,14 @@ void HSView::renderCard(const HSCard& card, const HSFrame& f, const Time::steady
     const auto dragged = m_dragged.lock();
     PHLWINDOW lastWindow;
 
+    if (HSConfig::value<Config::INTEGER>("debug")) {
+        for (const auto& w : windows) {
+            const auto b = windowBox(w, card, f);
+            hs_log("ws{} \"{}\" real={:.0f} box=({:.0f},{:.0f} {:.0f}x{:.0f}) tex={}", card.id, w->m_title, hs_window_render_pos(w).x, b.x, b.y, b.w, b.h,
+                   w->wlSurface() && w->wlSurface()->resource() && w->wlSurface()->resource()->m_current.texture ? "yes" : "NO");
+        }
+    }
+
     for (const auto& w : windows) {
         if (w->m_isFloating || w == dragged)
             continue;
@@ -793,4 +834,13 @@ void HSView::postRender() {
     // Keep the render pass from deciding an opaque element hides the ones behind it: under a
     // renderModif that reasoning no longer holds.
     g_pHyprRenderer->m_renderPass.add(makeUnique<HSPassElement>());
+
+    // The pass hands each element `frameDamage ∩ its own UNTRANSFORMED box`. For a column
+    // scrolled off the viewport that intersection is empty, so the surface was dropped before
+    // the render modifier ever got a chance to move it on screen -- which is why only the two
+    // or three columns nearest the viewport used to draw. Widening the damage past the monitor
+    // keeps every intersection non-empty; the modifier then puts each window where it belongs.
+    // The pass overwrites m_renderData.damage with its own result afterwards, so this does not
+    // leak into the next frame.
+    g_pHyprRenderer->m_renderData.damage = CRegion {CBox {-HS_DAMAGE_SLACK, -HS_DAMAGE_SLACK, HS_DAMAGE_SLACK * 2, HS_DAMAGE_SLACK * 2}};
 }

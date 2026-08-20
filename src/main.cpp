@@ -139,6 +139,7 @@ typedef void (*render_border_t)(void* thisptr, const CBox& box, const Config::CG
 typedef void (*render_border2_t)(void* thisptr, const CBox& box, const Config::CGradientValueData& grad1, const Config::CGradientValueData& grad2, float lerp,
                                  Render::GL::CHyprOpenGLImpl::SBorderRenderData data);
 typedef bool (*blur_optimizations_t)(void* thisptr, PHLLS layer, PHLWINDOW window);
+typedef CRegion (*visible_region_t)(void* thisptr, bool& cancel);
 
 static bool hs_scaled_render() {
     if (!hs_manager)
@@ -216,6 +217,19 @@ static void hook_render_border2(void* thisptr, const CBox& box, const Config::CG
                                 Render::GL::CHyprOpenGLImpl::SBorderRenderData data) {
     CBox tbox = box;
     render_border_scaled(tbox, data, [&] { ((render_border2_t)(render_border2_hook->m_original))(thisptr, tbox, grad1, grad2, lerp, data); });
+}
+
+// A client can declare, through hyprland_surface_v1, which part of its surface is actually
+// visible, so the compositor can skip the rest -- alacritty is one of the few that bothers.
+// Hyprland derives that from the window's real on-screen position, so for a column scrolled off
+// the viewport the region collapses and ElementRenderer cancels the draw outright. In the
+// overview those windows ARE on screen, just somewhere else, so the whole notion has to be
+// switched off while we render: an empty region with cancel left alone means "no restriction".
+static CRegion hook_visible_region(void* thisptr, bool& cancel) {
+    if (hs_manager && hs_manager->anyRendering())
+        return CRegion {};
+
+    return ((visible_region_t)(visible_region_hook->m_original))(thisptr, cancel);
 }
 
 // The optimized blur path samples a precomputed framebuffer holding the pre-overview desktop,
@@ -349,6 +363,10 @@ static void init_hooks() {
         (void*)hook_blur_optimizations);
     success = blur_optimizations_hook->hook() && success;
 
+    visible_region_hook = HyprlandAPI::createFunctionHook(PHANDLE, resolve("_ZN19CSurfacePassElement13visibleRegionERb", "CSurfacePassElement::visibleRegion"),
+                                                         (void*)hook_visible_region);
+    success = visible_region_hook->hook() && success;
+
     const auto solitary = HyprlandAPI::findFunctionsByName(PHANDLE, "isSolitaryBlocked");
     if (solitary.empty())
         fail_exit("could not resolve isSolitaryBlocked");
@@ -394,7 +412,7 @@ static void init_config() {
     // Geometry
     ADD_CONFIG(CFloatValue, "zoom", "how far to zoom out, as a fraction of the monitor (niri default 0.5)", 0.5F);
     ADD_CONFIG(CFloatValue, "workspace_gap", "vertical gap between workspaces, as a fraction of monitor height", 0.1F);
-    ADD_CONFIG(CIntValue, "auto_fit", "zoom out further when a workspace's tape is wider than the screen", 1);
+    ADD_CONFIG(CIntValue, "auto_fit", "0 = always use zoom; 1 = pick one zoom per session from the longest tape; 2 = re-fit per workspace", 1);
     ADD_CONFIG(CFloatValue, "min_zoom", "how far auto_fit is allowed to zoom out", 0.12F);
     ADD_CONFIG(CIntValue, "fit_rows", "also zoom out until every workspace row fits on screen", 0);
 
@@ -419,6 +437,8 @@ static void init_config() {
     ADD_CONFIG(CFloatValue, "scroll_speed", "wheel sensitivity when walking workspaces", 1.F);
     ADD_CONFIG(CIntValue, "select_button", "mouse button that picks a window", BTN_LEFT);
     ADD_CONFIG(CIntValue, "pan_button", "mouse button that drags the tape sideways, 0 to disable", BTN_RIGHT);
+
+    ADD_CONFIG(CIntValue, "debug", "log per-window overview geometry each frame", 0);
 
     // Touchpad
     ADD_CONFIG(CIntValue, "gestures:enabled", "enable touchpad gestures", 1);

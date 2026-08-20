@@ -134,7 +134,13 @@ bind = SUPER, U, hyprscape:toggle, all
 | arrows / `hjkl` | navigate rows and columns |
 | four-finger swipe up | open, continuously, tracking the swipe |
 
-Your own keybinds keep working while the overview is open; only the keys above are intercepted.
+Navigating the overview really navigates: the compositor switches workspace and moves focus along
+with you. So every bind you already have — close the window, move it to workspace 3, swap columns —
+acts on whatever is in the centre, not on whatever was focused before you opened the overview.
+
+Only *bare* keys from the table above are intercepted. Anything with a modifier held goes straight
+to your own binds, so `SUPER+SHIFT+L` still swaps columns and `ALT+2` still throws a window at
+workspace 2.
 
 ## Dispatchers
 
@@ -159,12 +165,13 @@ All keys live under `plugin:hyprscape:`.
 | --- | --- | --- |
 | `zoom` | `0.5` | how far to zoom out; a workspace card is this fraction of the monitor. niri's default. |
 | `workspace_gap` | `0.1` | vertical gap between rows, as a fraction of monitor height (scaled with the zoom, as in niri) |
-| `auto_fit` | `1` | if the **selected** workspace's tape is wider than the screen even at `zoom`, keep zooming out until it fits, and recentre on the content. Animated, so moving between workspaces with very different tape lengths eases rather than snaps. |
+| `auto_fit` | `1` | `0` — always use `zoom`. `1` — pick **one** zoom when the overview opens, tight enough that the most demanding workspace fits with its anchor centred, and hold it for the whole session. `2` — re-fit for whichever workspace is selected, so the zoom changes as you move between rows. |
 | `min_zoom` | `0.12` | the floor `auto_fit` will not go below |
 | `fit_rows` | `0` | also zoom out until *every* workspace row fits on screen at once |
 
-`auto_fit` is the one that matters for long tapes: with it on, "show me everything" actually shows
-you everything instead of running off the bezel. Turn it off for niri's fixed-zoom behaviour.
+`auto_fit` matters for long tapes: at mode `1` "show me everything" actually shows you everything
+instead of running off the bezel, and the zoom stays put while you navigate. Set it to `0` for
+niri's strictly fixed zoom.
 
 ### Appearance
 
@@ -236,6 +243,11 @@ and the bar stays put in front of them, at their real sizes.
 
 Three details that are easy to get wrong and are handled explicitly:
 
+- **Off-viewport columns.** The render pass hands each surface `frameDamage ∩ its own
+  untransformed box`. For a column scrolled off the viewport that intersection is empty and the
+  surface is dropped before the modifier ever gets a chance to move it on screen — which caps you
+  at the two or three columns nearest the viewport. hyprscape widens the frame damage well past
+  the monitor for the duration of its own pass.
 - **Slid-out workspaces.** Hyprland parks a non-visible workspace's `m_renderOffset` at roughly a
   screen width, and `renderWindow` adds it to every window position. hyprscape folds that offset
   into each card's source origin so it cancels exactly.
@@ -248,9 +260,11 @@ Three details that are easy to get wrong and are handled explicitly:
   the wrong place. `renderTexture`, both `renderBorder` overloads and `shouldUseNewBlurOptimizations`
   are hooked to keep those paths in the same coordinate space.
 
-Navigating the overview never touches the compositor's active workspace; the choice is committed
-once, on close. Column navigation goes through `CSpace::layoutMsg`, so it works with scrolling,
-dwindle and master alike.
+Column navigation is pure overview state — an index into that workspace's own tape — so it works on
+any row rather than only on whichever workspace the compositor considers active. Selecting anything
+focuses it for real, with `FOCUS_REASON_KEYBIND`: the scrolling layout treats a `CLICK` focus as
+"only scroll if the pointer is already over the window", which can never be true of a zoomed-out
+copy, so a click focus would leave you focused on something you could not see.
 
 ## Limitations
 

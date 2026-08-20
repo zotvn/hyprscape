@@ -16,7 +16,29 @@ namespace {
 
 constexpr double CLICK_SLOP = 6.0; // logical px of travel still counted as a click
 
+bool isModifier(uint32_t keycode) {
+    switch (keycode) {
+        case KEY_LEFTSHIFT:
+        case KEY_RIGHTSHIFT:
+        case KEY_LEFTCTRL:
+        case KEY_RIGHTCTRL:
+        case KEY_LEFTALT:
+        case KEY_RIGHTALT:
+        case KEY_LEFTMETA:
+        case KEY_RIGHTMETA: return true;
+        default: return false;
+    }
+}
+
 } // namespace
+
+bool HSManager::shiftHeld() const {
+    return m_modsHeld.contains(KEY_LEFTSHIFT) || m_modsHeld.contains(KEY_RIGHTSHIFT);
+}
+
+bool HSManager::anyModHeld() const {
+    return !m_modsHeld.empty();
+}
 
 void HSManager::updateHover() {
     const auto view = viewFromCursor();
@@ -153,7 +175,7 @@ bool HSManager::onMouseAxis(const IPointer::SAxisEvent& event) {
 
     // Bare vertical wheel walks the workspace stack; shift (or a horizontal wheel) walks
     // columns along the tape. Same split as niri.
-    if (event.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL || m_shiftHeld) {
+    if (event.axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL || shiftHeld()) {
         view->selectColumn(dir);
         return true;
     }
@@ -171,8 +193,11 @@ bool HSManager::onMouseAxis(const IPointer::SAxisEvent& event) {
 bool HSManager::onKey(const IKeyboard::SKeyEvent& event) {
     const bool pressed = event.state == WL_KEYBOARD_KEY_STATE_PRESSED;
 
-    if (event.keycode == KEY_LEFTSHIFT || event.keycode == KEY_RIGHTSHIFT) {
-        m_shiftHeld = pressed;
+    if (isModifier(event.keycode)) {
+        if (pressed)
+            m_modsHeld.insert(event.keycode);
+        else
+            m_modsHeld.erase(event.keycode);
         return false;
     }
 
@@ -181,6 +206,11 @@ bool HSManager::onKey(const IKeyboard::SKeyEvent& event) {
         return false;
 
     if (!pressed)
+        return false;
+
+    // Anything with a modifier belongs to the user's own binds -- SUPER+SHIFT+L to swap columns,
+    // ALT+2 to throw a window at workspace 2, and so on. Only bare keys are ours.
+    if (anyModHeld())
         return false;
 
     // niri's hardcoded overview keys. Everything else falls through so the user's own binds
