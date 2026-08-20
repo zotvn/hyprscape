@@ -210,6 +210,63 @@ niri's strictly fixed zoom.
 | `select_button` | `BTN_LEFT` (272) | button that picks a window |
 | `pan_button` | `BTN_RIGHT` (273) | button that drags the tape sideways; `0` disables |
 
+### Everything, in one block
+
+Copy-paste this into your Lua config and edit — every key with its default:
+
+```lua
+hl.config({
+    plugin = {
+        hyprscape = {
+            -- geometry
+            zoom          = 0.5,          -- workspace card size, as a fraction of the monitor
+            workspace_gap = 0.1,          -- vertical gap between rows, fraction of monitor height
+            auto_fit      = 1,            -- 0 fixed | 1 one zoom per session | 2 per workspace
+            min_zoom      = 0.12,         -- floor for auto_fit
+            fit_rows      = 0,            -- also fit every workspace row on screen at once
+
+            -- appearance
+            backdrop_color           = "rgba(16161ecc)",  -- wallpaper dim; base when layers are off
+            card_color               = "rgba(00000000)",  -- band behind every row
+            active_row_color         = "rgba(00000000)",  -- band behind the selected row
+            render_background_layers = 1,                 -- wallpaper, unscaled and unmoved
+            render_top_layers        = 1,                 -- bar, unscaled and unmoved
+            active_border_size       = 2,                 -- ring on the centred window
+            active_border_color      = "rgba(3399ffff)",
+            hover_border_size        = 3,                 -- ring on the hovered window
+            hover_border_color       = "rgba(88bbffff)",
+
+            -- which workspaces get a row
+            show_empty         = 0,       -- also show empty workspaces you are not on
+            trailing_workspace = 1,       -- keep one empty row at the bottom as a drop target
+            new_workspace_hint = 0,       -- outline that trailing row
+
+            -- behaviour
+            exit_on_click   = 1,          -- a click picks a target and leaves
+            close_on_reload = 1,
+            warp_cursor     = 0,          -- warp the pointer onto what you select
+            scroll_speed    = 1.0,        -- wheel sensitivity when walking rows
+            select_button   = 272,        -- BTN_LEFT
+            pan_button      = 273,        -- BTN_RIGHT, 0 disables
+            debug           = 0,          -- log per-window overview geometry each frame
+
+            -- touchpad
+            gestures = {
+                enabled       = 1,
+                open_fingers  = 4,
+                open_distance = 300,
+                open_positive = 0,        -- 1 if swiping down should open
+            },
+        },
+    },
+})
+```
+
+Remember the first-pass caveat: `hl.plugin.load()` only records the path, so these keys do not
+exist until after your config has finished evaluating. Setting them produces one "unknown config
+key" warning on the first pass, then Hyprland loads the plugin and re-parses. Harmless, but
+`--verify-config` will flag it.
+
 ### Touchpad
 
 | Key | Default | Meaning |

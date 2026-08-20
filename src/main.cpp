@@ -422,8 +422,8 @@ static void init_config() {
     ADD_CONFIG(CColorValue, "active_row_color", "band behind the selected workspace row; alpha 0 disables it", 0x00000000);
     ADD_CONFIG(CIntValue, "render_background_layers", "draw background/bottom layer surfaces (your wallpaper), unscaled and unmoved", 1);
     ADD_CONFIG(CIntValue, "render_top_layers", "draw top/overlay layer surfaces (your bar), unscaled and unmoved", 1);
-    ADD_CONFIG(CFloatValue, "active_border_size", "border around the selected workspace, 0 to disable", 2.F);
-    ADD_CONFIG(CColorValue, "active_border_color", "border colour for the selected workspace", 0xFF3399FF);
+    ADD_CONFIG(CFloatValue, "active_border_size", "ring around the centred window of the selected row, 0 to disable", 2.F);
+    ADD_CONFIG(CColorValue, "active_border_color", "colour of that ring", 0xFF3399FF);
     ADD_CONFIG(CFloatValue, "hover_border_size", "border around the hovered window, 0 to disable", 3.F);
     ADD_CONFIG(CColorValue, "hover_border_color", "border colour for the hovered window", 0xFF88BBFF);
 
