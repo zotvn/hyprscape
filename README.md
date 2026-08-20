@@ -183,7 +183,7 @@ niri's strictly fixed zoom.
 | --- | --- | --- |
 | `backdrop_color` | `rgba(16161ecc)` | dims the wallpaper as the overview opens, and is the opaque base when background layers are off. Its alpha is faded in with the animation, so at rest it changes nothing. |
 | `card_color` | `rgba(00000000)` | band behind every workspace row, full output width |
-| `active_row_color` | `rgba(ffffff14)` | band behind the *selected* row, so which workspace you are on is obvious at a glance |
+| `active_row_color` | `rgba(00000000)` | band behind the *selected* row. Off by default — the ring on the centred window already says where you are. |
 | `render_background_layers` | `1` | draw background/bottom layer surfaces (your wallpaper) — unscaled and unmoved, as a backdrop |
 | `render_top_layers` | `1` | draw top/overlay layer surfaces (your bar) — unscaled and unmoved, over everything |
 | `active_border_size` | `2` | ring around the centred window of the selected row — what closing will focus; `0` disables |
@@ -197,6 +197,7 @@ niri's strictly fixed zoom.
 | --- | --- | --- |
 | `show_empty` | `0` | also give a row to empty workspaces you are not on. **Leave this off** — it is what made hyprtasking's grid look like nonsense. |
 | `trailing_workspace` | `1` | keep one empty row at the bottom, niri style, as a drop target for making a new workspace |
+| `new_workspace_hint` | `0` | outline that trailing row so the drop target is visible. Off by default: rows span the whole output, so an outline reads as two lines across the screen rather than as a card. |
 
 ### Behaviour
 

@@ -69,6 +69,10 @@ class HSView {
     PHLANIMVAR<float> m_pan;      // manual horizontal pan, in workspace pixels
     PHLANIMVAR<float> m_fitZoom;  // the zoom the overview settles at, fixed for the session
 
+    // Where the selected row's anchor column sits relative to the centre. Its goal tracks the
+    // live geometry every frame; the easing between goals is what makes a column scroll read as
+    // the tape sliding through a stationary centre rather than snapping to it.
+    PHLANIMVAR<float> m_anchorX;
     WORKSPACEID m_selected = WORKSPACE_INVALID;
     PHLWINDOWREF m_hovered;
 

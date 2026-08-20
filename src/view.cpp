@@ -72,6 +72,7 @@ HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
     g_pAnimationManager->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
 }
 
 PHLMONITOR HSView::monitor() const {
@@ -272,14 +273,23 @@ void HSView::syncRow() {
     if (const auto active = monitor->m_activeWorkspace; active && active->m_id != m_selected) {
         m_selected = active->m_id;
         m_pan->setValueAndWarp(0.F);
+        // Rows carry their own anchor, so arriving at a new row should not also slide sideways:
+        // the vertical travel is the animation, and a diagonal drift on top of it reads as a bug.
+        m_anchorX->setValueAndWarp((float)anchorOffset(active));
     }
 
     // Re-target every frame rather than only on navigation: a workspace appearing or being
     // destroyed shifts every row index below it, which would otherwise leave the selected row
     // sitting at someone else's position.
-    const float target = (float)rowIndexOf(m_selected, frame().cards);
-    if (std::abs(m_row->goal() - target) > 0.001F)
-        *m_row = target;
+    const float rowTarget = (float)rowIndexOf(m_selected, frame().cards);
+    if (std::abs(m_row->goal() - rowTarget) > 0.001F)
+        *m_row = rowTarget;
+
+    // Likewise for the horizontal anchor: retargeting every frame means a window closing or the
+    // layout scrolling under us is absorbed by the same easing, instead of snapping.
+    const float anchorTarget = (float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected));
+    if (std::abs(m_anchorX->goal() - anchorTarget) > 0.5F)
+        *m_anchorX = anchorTarget;
 }
 
 void HSView::updateFit(bool warp) {
@@ -376,9 +386,9 @@ HSFrame HSView::frame() const {
         // The selected row's offset is animated; the others read straight off their anchor.
         // Fading the offset in with the progress keeps progress 0 an exact identity transform:
         // there viewOrigin is the monitor origin, zoom is 1 and contentOrigin is baseX == mbox.x.
-        double offset = anchorOffset(c.workspace);
-        if (c.id == m_selected)
-            offset += m_pan->value();
+        // The selected row eases toward its anchor; the others sit exactly on theirs, since
+        // nothing moves them.
+        double offset = c.id == m_selected ? (double)m_anchorX->value() + m_pan->value() : anchorOffset(c.workspace);
 
         c.viewOrigin = {f.monitorBox.x + offset * f.progress, f.monitorBox.y};
     }
@@ -449,6 +459,7 @@ void HSView::show() {
     if (stale) {
         syncSelectionToMonitor();
         m_pan->setValueAndWarp(0.F);
+        m_anchorX->setValueAndWarp((float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected)));
         updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
     }
@@ -525,7 +536,9 @@ void HSView::selectWorkspace(WORKSPACEID id) {
     m_selected = id;
     m_pan->setValueAndWarp(0.F);
 
-    applySelection(anchorWindow(g_pCompositor->getWorkspaceByID(id)));
+    const auto ws = g_pCompositor->getWorkspaceByID(id);
+    applySelection(anchorWindow(ws));
+    m_anchorX->setValueAndWarp((float)anchorOffset(ws));
 
     updateFit(false);
     *m_row = (float)rowIndexOf(id, frame().cards);
@@ -757,12 +770,16 @@ void HSView::renderCard(const HSCard& card, const HSFrame& f, const Time::steady
     }
 
     if (!card.workspace) {
-        // The trailing card has nothing to draw, so give it an outline -- otherwise the "drop a
-        // window here to get a new workspace" affordance is invisible.
+        // The trailing row is the "drop a window here for a new workspace" target. Outlining it
+        // is off by default: rows span the whole output, so its top and bottom edges drew as two
+        // lines running the full width of the screen rather than as anything card-shaped.
         const float size = HSConfig::value<Config::FLOAT>("active_border_size");
-        if (size > 0.F && f.progress > 0.01F) {
+        if (HSConfig::value<Config::INTEGER>("new_workspace_hint") && size > 0.F && f.progress > 0.01F) {
+            // Sized to what a workspace viewport looks like at this zoom, and centred, so it
+            // reads as an empty card instead of a band.
+            const float w = f.monitorBox.w * f.zoom;
             CBorderPassElement::SBorderData hint;
-            hint.box = toBuffer(monitor, card.box);
+            hint.box = toBuffer(monitor, CBox {f.monitorBox.x + (f.monitorBox.w - w) / 2.F, card.box.y, w, card.box.h});
             hint.grad1 = Config::CGradientValueData {fade(colorOf("active_border_color"), f.progress * 0.35F)};
             hint.borderSize = std::round(size);
             g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(hint));
