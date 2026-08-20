@@ -1,30 +1,26 @@
 {
   description = "hyprscape - a niri-style zoom-out overview for Hyprland's scrolling layout";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    systems.url = "github:nix-systems/default-linux";
-  };
+  # Only one input, so a consumer that already has nixpkgs pays nothing extra:
+  #   inputs.hyprscape.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs = {
     self,
     nixpkgs,
-    systems,
     ...
   }: let
     inherit (nixpkgs) lib;
-    forSystems = f: lib.genAttrs (import systems) (system: f system nixpkgs.legacyPackages.${system});
+    systems = ["x86_64-linux" "aarch64-linux"];
+    forSystems = f: lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
   in {
     # The plugin ABI is tied to one exact Hyprland build, so the derivation is parameterised by
-    # the Hyprland package rather than pinning one. Home Manager users should pass the very same
-    # `hyprland` package their session runs:
+    # the Hyprland package instead of pinning one. Pass the very same Hyprland your session runs:
     #
-    #   wayland.windowManager.hyprland.plugins = [
-    #     (inputs.hyprscape.lib.mkHyprscape {
-    #       pkgs = pkgs;
-    #       hyprland = config.wayland.windowManager.hyprland.package;
-    #     })
-    #   ];
+    #   hyprscape = inputs.hyprscape.lib.mkHyprscape {
+    #     inherit pkgs;
+    #     hyprland = inputs.hyprland.packages.${system}.hyprland;
+    #   };
     lib.mkHyprscape = {
       pkgs,
       hyprland ? pkgs.hyprland,
