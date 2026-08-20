@@ -33,6 +33,11 @@
         nativeBuildInputs = [pkgs.pkg-config] ++ hyprland.nativeBuildInputs;
         buildInputs = [hyprland] ++ hyprland.buildInputs;
 
+        # Hyprland's nativeBuildInputs drag in cmake, whose setup hook would otherwise take over
+        # the configure phase and look for a CMakeLists.txt we do not have.
+        dontUseCmakeConfigure = true;
+        dontConfigure = true;
+
         buildPhase = ''
           runHook preBuild
           g++ -std=c++23 -shared -fPIC --no-gnu-unique -O2 \
