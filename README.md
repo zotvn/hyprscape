@@ -39,6 +39,10 @@ hyprscape drops the grid entirely:
 - **windows keep their true tape position.** Columns scrolled off the viewport render *outside*
   the workspace card, to its left and right. That overflow is the feature — it is what makes the
   tape visible;
+- **the centre of the screen is a fixed reference.** Each row is anchored on the window it was
+  focused on when you opened the overview, so that window sits dead centre with its earlier
+  columns to the left. Scrolling columns slides the tape *through* that centre; the centre itself
+  never moves. Rows are anchored independently, so scrolling one workspace never shifts another;
 - **it is a real zoom.** At progress 0 the transform is the identity, so opening the overview is a
   continuous zoom-out from your desktop rather than a cut to a different screen.
 
@@ -120,13 +124,13 @@ bind = SUPER, U, hyprscape:toggle, all
 | --- | --- |
 | `hyprscape:toggle` | open / close the overview |
 | mouse wheel | walk the workspace stack, up and down |
-| shift + wheel, or horizontal wheel | walk columns along the selected workspace's tape |
+| shift + wheel, or horizontal wheel | slide the selected row's tape through the centre, one column at a time |
 | left click on a window | focus it, switch to its workspace, close the overview |
 | left click beside a card | switch to that workspace and close |
 | left drag a window | move it to whatever workspace row you drop it on — including the empty one at the bottom, which creates a new workspace |
 | right drag | pan the tape sideways |
 | `Escape` | close |
-| `Enter` | close onto the hovered window |
+| `Enter` | close onto the hovered window, or the centred one |
 | arrows / `hjkl` | navigate rows and columns |
 | four-finger swipe up | open, continuously, tracking the swipe |
 
@@ -215,11 +219,20 @@ hl.animation({ leaf = "workspaces", enabled = true, speed = 5, bezier = "default
 
 `renderWorkspace` is hooked; while the overview is up, hyprscape draws the monitor itself instead.
 
-For each workspace row it pushes a single render modifier that maps the workspace's coordinate
-space onto that row's card, then walks the workspace's windows in Hyprland's own z-order
+For each workspace row it pushes a single render modifier that maps that workspace's coordinate
+space onto the row, then walks the workspace's windows in Hyprland's own z-order
 (tiled → popups → floating) calling `renderWindow` directly. Because the modifier covers the whole
-card, a window scrolled off the viewport simply lands outside the card, which is exactly the
-overflow we want.
+row rather than a clipped tile, a window scrolled off the viewport simply lands beside its row,
+which is exactly the overflow we want.
+
+The horizontal placement of each row is one number: the distance from the centre of the screen to
+the centre of that workspace's *anchor column*. Anchors are captured when the overview opens and
+only change when you scroll columns, so the centre is a stationary reference and the tapes are
+what move. Fading that offset in with the open animation is what keeps progress 0 a pixel-exact
+identity transform.
+
+Layer surfaces are drawn outside the modifier entirely: the wallpaper stays put behind the rows
+and the bar stays put in front of them, at their real sizes.
 
 Three details that are easy to get wrong and are handled explicitly:
 

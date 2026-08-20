@@ -757,16 +757,26 @@ void HSView::renderLayers(const Time::steady_tp& time, bool top) {
     // any one workspace, so they must not move or scale with the cards.
     const std::array<int, 2> levels = top ? std::array<int, 2> {2, 3} : std::array<int, 2> {0, 1};
 
+    // popups=false draws the surface itself; the popup pass is separate and comes after
+    // everything, exactly as renderWorkspace orders it.
     for (const auto& level : levels) {
         for (const auto& ref : monitor->m_layerSurfaceLayers[level]) {
             const auto ls = ref.lock();
             if (ls && !ls->m_fadingOut)
-                hs_render_layer(ls, monitor, time, top);
+                hs_render_layer(ls, monitor, time, false);
         }
     }
 
     if (!top)
         return;
+
+    for (const auto& lsl : monitor->m_layerSurfaceLayers) {
+        for (const auto& ref : lsl) {
+            const auto ls = ref.lock();
+            if (ls && !ls->m_fadingOut)
+                hs_render_layer(ls, monitor, time, true);
+        }
+    }
 
     // Pinned windows float above everything, on every workspace -- drawing them unscaled keeps
     // that promise and sidesteps renderWindow's pinned-window offset special case.
