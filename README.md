@@ -186,10 +186,16 @@ niri's strictly fixed zoom.
 | `active_row_color` | `rgba(00000000)` | band behind the *selected* row. Off by default — the ring on the centred window already says where you are. |
 | `render_background_layers` | `1` | draw background/bottom layer surfaces (your wallpaper) — unscaled and unmoved, as a backdrop |
 | `render_top_layers` | `1` | draw top/overlay layer surfaces (your bar) — unscaled and unmoved, over everything |
-| `active_border_size` | `2` | ring around the centred window of the selected row — what closing will focus; `0` disables |
+| `active_border_size` | `2` | **the centre rectangle** — the ring around the centred window of the selected row, which is what closing will focus; `0` disables |
 | `active_border_color` | `rgba(3399ffff)` | its colour |
-| `hover_border_size` | `3` | ring around the hovered window; `0` disables |
+| `active_border_rounding` | `-1` | its corner radius, in logical pixels. `-1` follows the ringed window's own rounding, scaled by the zoom |
+| `hover_border_size` | `3` | ring around the hovered window; `0` disables. Only ever shown after the pointer has actually moved — walking the tape with the keyboard never lights one up |
 | `hover_border_color` | `rgba(88bbffff)` | its colour |
+| `hover_border_rounding` | `-1` | its corner radius; `-1` follows the window's own rounding |
+| `window_rounding` | `-1` | corner radius of the windows themselves in the overview. `-1` scales each window's own rounding by the zoom, which is what a true zoom-out looks like; set a number to force one flat radius |
+
+Every ring is snapped to whole device pixels before it is drawn, so all four of its sides come
+out the same width regardless of where the zoom happens to land the box.
 
 ### Which workspaces get a row
 
@@ -231,10 +237,13 @@ hl.config({
             active_row_color         = "rgba(00000000)",  -- band behind the selected row
             render_background_layers = 1,                 -- wallpaper, unscaled and unmoved
             render_top_layers        = 1,                 -- bar, unscaled and unmoved
-            active_border_size       = 2,                 -- ring on the centred window
+            active_border_size       = 2,                 -- the centre rectangle
             active_border_color      = "rgba(3399ffff)",
+            active_border_rounding   = -1,                -- -1 = follow the window's rounding
             hover_border_size        = 3,                 -- ring on the hovered window
             hover_border_color       = "rgba(88bbffff)",
+            hover_border_rounding    = -1,
+            window_rounding          = -1,                -- -1 = scale each window's own rounding
 
             -- which workspaces get a row
             show_empty         = 0,       -- also show empty workspaces you are not on
@@ -249,6 +258,14 @@ hl.config({
             select_button   = 272,        -- BTN_LEFT
             pan_button      = 273,        -- BTN_RIGHT, 0 disables
             debug           = 0,          -- log per-window overview geometry each frame
+
+            -- motion
+            animation_curve   = "smooth", -- "smooth" | "spring" | "inherit" | your own curve name
+            animation_speed   = 4,        -- deciseconds; higher is slower. Springs ignore it
+            animation_enabled = 1,        -- 0 snaps with no animation at all
+            spring_stiffness  = 250,      -- only for animation_curve = "spring"
+            spring_damping    = 25,       -- raise it to take the bounce out
+            spring_mass       = 1,
 
             -- touchpad
             gestures = {
@@ -276,14 +293,38 @@ key" warning on the first pass, then Hyprland loads the plugin and re-parses. Ha
 | `gestures:open_distance` | `300` | swipe distance for a full open/close |
 | `gestures:open_positive` | `0` | `1` if swiping *down* should open |
 
-### Animation
+### Motion
 
-hyprscape drives the whole thing from one animated scalar and borrows your existing `workspaces`
-animation curve, so it already matches the rest of your desktop. To make it snappier:
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `animation_curve` | `smooth` | `"smooth"`, `"spring"`, `"inherit"`, or the name of any bezier or spring you defined with `hl.curve` |
+| `animation_speed` | `4` | duration in deciseconds — **higher is slower**, same units as Hyprland's own `speed`. Springs ignore it; they run until they settle. |
+| `animation_enabled` | `1` | `0` snaps instantly, with no animation at all |
+| `spring_stiffness` | `250` | for `animation_curve = "spring"` |
+| `spring_damping` | `25` | raise it to take the bounce out; drop it to about `5` for a pronounced overshoot |
+| `spring_mass` | `1` | |
+
+Everything the overview animates — opening and closing, walking columns, walking rows, the zoom
+settling — runs off this one node.
+
+- **`smooth`** is an ease-out cubic. It never travels past its goal, so nothing bounces.
+- **`spring`** is a real spring: it accelerates, overshoots if it is underdamped, and settles.
+  It ignores `animation_speed`; how long it takes is a consequence of stiffness, damping and mass.
+- **`inherit`** is the pre-0.2 behaviour: whatever you set for the `workspaces` leaf, curve and
+  speed and all. Hyprland's `default` bezier ends at 1.05, so this one *does* overshoot slightly.
+- Any other value names a curve of your own:
 
 ```lua
-hl.animation({ leaf = "workspaces", enabled = true, speed = 5, bezier = "default" })
+hl.curve("myease", { type = "bezier", points = { { 0.2, 0.9 }, { 0.1, 1 } } })
+hl.curve("mybounce", { type = "spring", stiffness = 400, damping = 12 })
+
+hl.config({ plugin = { hyprscape = {
+    animation_curve = "myease",   -- or "mybounce": springs are matched by name too
+    animation_speed = 3,
+} } })
 ```
+
+If the name matches nothing, hyprscape logs once and falls back to `smooth`.
 
 ## How it works
 

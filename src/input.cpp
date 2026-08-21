@@ -45,6 +45,12 @@ void HSManager::updateHover() {
     if (!view)
         return;
 
+    // Only a real pointer event arms hover. Without this the ring stays parked on whatever the
+    // cursor happened to be over, and every keyboard step slides a different window underneath
+    // it -- which looks like the overview highlighting windows at random.
+    if (!view->m_hoverArmed)
+        return;
+
     const auto coords = g_pInputManager->getMouseCoordsInternal();
     const auto window = view->windowAt(coords);
 
@@ -92,6 +98,7 @@ bool HSManager::onMouseMove() {
         return true;
     }
 
+    view->m_hoverArmed = true;
     updateHover();
 
     // Swallow motion so clients never see pointer coordinates that belong to a scaled-down

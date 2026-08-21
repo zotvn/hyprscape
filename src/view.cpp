@@ -5,7 +5,6 @@
 #include <cmath>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
@@ -21,6 +20,7 @@
 #include <hyprland/src/render/pass/RectPassElement.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
 
+#include "anim.hpp"
 #include "config.hpp"
 #include "globals.hpp"
 #include "pass/pass_element.hpp"
@@ -35,6 +35,22 @@ CBox toBuffer(PHLMONITOR monitor, CBox globalBox) {
     globalBox.translate(-monitor->m_position);
     globalBox.scale(monitor->m_scale);
     return globalBox;
+}
+
+// renderBorder derives its scissor from CRegion{box}, and a CRegion is pixman -- integers, with
+// both the origin AND the size truncated on the way in. A box at x=100.6 w=300.7 therefore
+// scissors to [100, 400) while the quad really spans [100.6, 401.3), so the far edge loses a
+// pixel that the near edge keeps: a 2px ring drew 2px top-left and 1px bottom-right. Snapping
+// the box to whole buffer pixels first -- keeping x+w integral, not just rounding w -- makes
+// every side come out the same width.
+CBox snapToPixels(CBox box) {
+    const double x = std::round(box.x);
+    const double y = std::round(box.y);
+    box.w = std::max(std::round(box.x + box.w) - x, 1.0);
+    box.h = std::max(std::round(box.y + box.h) - y, 1.0);
+    box.x = x;
+    box.y = y;
+    return box;
 }
 
 CHyprColor colorOf(const std::string& key) {
@@ -55,6 +71,19 @@ constexpr int HS_DAMAGE_SLACK = 1 << 20;
 
 } // namespace
 
+// Corner radius for a ring, in buffer pixels. -1 means "whatever the window itself rounds to",
+// scaled by the zoom so a ring around a shrunken window is rounded like a shrunken window --
+// renderBorder takes its radius in final screen pixels, not in the space the modif works in.
+static int roundingFor(PHLWINDOW window, const std::string& key, PHLMONITOR monitor, float zoom) {
+    const double scale = monitor ? monitor->m_scale : 1.0;
+
+    const float configured = HSConfig::value<Config::FLOAT>(key);
+    if (configured >= 0.F)
+        return (int)std::round(configured * scale);
+
+    return window ? (int)std::round(window->rounding() * scale * zoom) : 0;
+}
+
 const HSCard* HSFrame::card(WORKSPACEID id) const {
     for (const auto& c : cards)
         if (c.id == id)
@@ -63,16 +92,17 @@ const HSCard* HSFrame::card(WORKSPACEID id) const {
 }
 
 HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
-    // Reuse the user's `workspaces` animation curve, so the overview feels like the rest of
-    // their desktop without a separate config node to discover.
-    auto& tree = Config::animationTree();
-    const auto cfg = tree->getAnimationPropertyConfig("workspaces");
+    // One animation node for the whole plugin, owned by us and refreshed on reload, so the
+    // overview's feel is a config key rather than a side effect of the user's workspace curve.
+    const auto cfg = hs_animation_config();
 
     g_pAnimationManager->createAnimation(0.F, m_progress, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(0.F, m_centerY, cfg, AVARDAMAGE_NONE);
+    g_pAnimationManager->createAnimation(Vector2D {}, m_centerSize, cfg, AVARDAMAGE_NONE);
 }
 
 PHLMONITOR HSView::monitor() const {
@@ -290,6 +320,34 @@ void HSView::syncRow() {
     const float anchorTarget = (float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected));
     if (std::abs(m_anchorX->goal() - anchorTarget) > 0.5F)
         *m_anchorX = anchorTarget;
+
+    syncCenter(false);
+}
+
+void HSView::syncCenter(bool warp) {
+    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const auto anchor = anchorWindow(ws);
+
+    m_centerValid = anchor != nullptr;
+    if (!anchor)
+        return;
+
+    const Vector2D size = anchor->m_realSize->value();
+    const float centerY = (float)(hs_window_render_pos(anchor).y - hs_workspace_render_offset(ws).y + size.y / 2.0);
+
+    if (warp) {
+        m_centerY->setValueAndWarp(centerY);
+        m_centerSize->setValueAndWarp(size);
+        return;
+    }
+
+    // Only the height and the vertical placement can actually change here -- horizontally the
+    // rectangle is pinned to the middle of the output -- so this is what makes a change of
+    // anchor morph the rectangle in place instead of popping.
+    if (std::abs(m_centerY->goal() - centerY) > 0.5F)
+        *m_centerY = centerY;
+    if (m_centerSize->goal().distance(size) > 0.5)
+        *m_centerSize = size;
 }
 
 void HSView::updateFit(bool warp) {
@@ -404,6 +462,29 @@ CBox HSView::windowBox(PHLWINDOW window, const HSCard& card, const HSFrame& f) c
     return CBox {(hs_window_render_pos(window) - srcOrigin) * f.zoom + card.contentOrigin, window->m_realSize->value() * f.zoom};
 }
 
+CBox HSView::centerBox(const HSFrame& f) const {
+    if (!m_centerValid || f.cards.empty())
+        return {};
+
+    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const Vector2D size = m_centerSize->value() * f.zoom;
+    if (size.x <= 0.0 || size.y <= 0.0)
+        return {};
+
+    const double baseX = f.monitorBox.x + (f.monitorBox.w - f.monitorBox.w * f.zoom) / 2.0;
+    const double baseY = f.monitorBox.y + (f.monitorBox.h - f.monitorBox.h * f.zoom) / 2.0;
+
+    // The same mapping a card draws under, evaluated with the row and the anchor already at
+    // rest. Feeding it the live anchorOffset rather than the animated m_anchorX is what nails
+    // the rectangle down: the offset term is multiplied by (1 - progress), so at progress 1 it
+    // vanishes and the centre is exactly the middle of the output no matter where the tape has
+    // got to, while at progress 0 it still lands on the window's real on-screen box.
+    const double cx = (f.monitorBox.w / 2.0 + anchorOffset(ws) * (1.0 - f.progress)) * f.zoom + baseX;
+    const double cy = (m_centerY->value() - f.monitorBox.y) * f.zoom + baseY;
+
+    return CBox {cx - size.x / 2.0, cy - size.y / 2.0, size.x, size.y};
+}
+
 std::optional<HSCard> HSView::cardAt(const Vector2D& global) const {
     const auto f = frame();
 
@@ -462,7 +543,12 @@ void HSView::show() {
         m_anchorX->setValueAndWarp((float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected)));
         updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
+        syncCenter(true);
     }
+
+    // The pointer has not moved yet, so nothing is hovered -- whatever it was resting on when
+    // the overview opened is not a choice the user made.
+    disarmHover();
 
     *m_progress = 1.F;
     m_progress->setCallbackOnEnd(nullptr);
@@ -494,7 +580,7 @@ void HSView::hide(PHLWINDOW focusWindow) {
         focusWindow->warpCursor(false);
 
     m_closing = true;
-    m_hovered.reset();
+    disarmHover();
     m_pan->setValueAndWarp(0.F);
 
     m_progress->setCallbackOnEnd([this](auto) {
@@ -529,9 +615,16 @@ void HSView::onConfigReloaded() {
         hide(nullptr);
 }
 
+void HSView::disarmHover() {
+    m_hoverArmed = false;
+    m_hovered.reset();
+}
+
 void HSView::selectWorkspace(WORKSPACEID id) {
     if (id == WORKSPACE_INVALID)
         return;
+
+    disarmHover();
 
     m_selected = id;
     m_pan->setValueAndWarp(0.F);
@@ -568,6 +661,8 @@ void HSView::selectColumn(int delta) {
     const auto columns = columnsOf(ws);
     if (columns.empty())
         return;
+
+    disarmHover();
 
     const auto anchor = anchorWindow(ws);
 
@@ -659,6 +754,11 @@ void HSView::render() {
 
     CScopeGuard guard([this] { postRender(); });
 
+    // Curve, speed and spring constants are ordinary config keys, so read them like every other
+    // one: per frame. A `hyprctl eval` never fires a config-reload, and waiting for one would
+    // make these the only keys in the plugin that need a restart.
+    hs_refresh_animation_config();
+
     // Windows move while the overview is open (drags, new clients), so re-derive the fit each
     // frame; the animated variable absorbs it smoothly.
     updateFit(false);
@@ -702,30 +802,33 @@ void HSView::render() {
         renderCard(c, f, time);
     }
 
-    // Ring the window sitting in the centre of the selected row -- the one closing will land
-    // on. The centre itself is deliberately not drawn: it is a reference, not furniture.
+    // The centre rectangle: the window the selected row is anchored on, drawn where it comes to
+    // rest rather than where it currently is. That is the whole point of it -- it is the fixed
+    // reference the tape slides through, so it must not travel in alongside the window it rings.
     const float activeBorder = HSConfig::value<Config::FLOAT>("active_border_size");
     if (activeBorder > 0.F && f.progress > 0.01F) {
-        const auto* selected = f.card(m_selected);
-        const auto anchor = selected ? anchorWindow(selected->workspace) : nullptr;
-        if (selected && anchor) {
+        const auto box = centerBox(f);
+        if (box.w > 0 && box.h > 0) {
             CBorderPassElement::SBorderData border;
-            border.box = toBuffer(monitor, windowBox(anchor, *selected, f));
+            border.box = snapToPixels(toBuffer(monitor, box));
             border.grad1 = Config::CGradientValueData {fade(colorOf("active_border_color"), f.progress)};
             border.borderSize = std::round(activeBorder);
+            border.round = roundingFor(selectedAnchor(), "active_border_rounding", monitor, f.zoom);
             g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
         }
     }
 
-    // Hover ring around the window a click would pick.
+    // Hover ring around the window a click would pick. This one does follow the live box: it is
+    // about what is under the pointer, which is a fact about right now.
     const float hoverBorder = HSConfig::value<Config::FLOAT>("hover_border_size");
-    if (hoverBorder > 0.F && f.progress > 0.01F) {
+    if (hoverBorder > 0.F && f.progress > 0.01F && m_hoverArmed) {
         if (const auto hovered = m_hovered.lock()) {
             if (const auto* c = hovered->m_workspace ? f.card(hovered->m_workspace->m_id) : nullptr) {
                 CBorderPassElement::SBorderData border;
-                border.box = toBuffer(monitor, windowBox(hovered, *c, f));
+                border.box = snapToPixels(toBuffer(monitor, windowBox(hovered, *c, f)));
                 border.grad1 = Config::CGradientValueData {fade(colorOf("hover_border_color"), f.progress)};
                 border.borderSize = std::round(hoverBorder);
+                border.round = roundingFor(hovered, "hover_border_rounding", monitor, f.zoom);
                 g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(border));
             }
         }
@@ -779,9 +882,10 @@ void HSView::renderCard(const HSCard& card, const HSFrame& f, const Time::steady
             // reads as an empty card instead of a band.
             const float w = f.monitorBox.w * f.zoom;
             CBorderPassElement::SBorderData hint;
-            hint.box = toBuffer(monitor, CBox {f.monitorBox.x + (f.monitorBox.w - w) / 2.F, card.box.y, w, card.box.h});
+            hint.box = snapToPixels(toBuffer(monitor, CBox {f.monitorBox.x + (f.monitorBox.w - w) / 2.F, card.box.y, w, card.box.h}));
             hint.grad1 = Config::CGradientValueData {fade(colorOf("active_border_color"), f.progress * 0.35F)};
             hint.borderSize = std::round(size);
+            hint.round = roundingFor(nullptr, "active_border_rounding", monitor, f.zoom);
             g_pHyprRenderer->m_renderPass.add(makeUnique<CBorderPassElement>(hint));
         }
         return;

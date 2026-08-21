@@ -5,6 +5,7 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 
+#include "anim.hpp"
 #include "config.hpp"
 #include "globals.hpp"
 
@@ -73,6 +74,10 @@ void HSManager::hide() {
 }
 
 void HSManager::onConfigReloaded() {
+    // Curves and speeds are read straight out of the config, and the legacy parser drops every
+    // registered bezier when it re-parses, so this has to happen before anything animates again.
+    hs_refresh_animation_config();
+
     rebuildViews();
     for (const auto& v : m_views)
         if (v)

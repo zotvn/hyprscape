@@ -20,6 +20,7 @@
 #include <hyprutils/math/Vector2D.hpp>
 #include <lua.hpp>
 
+#include "anim.hpp"
 #include "config.hpp"
 #include "globals.hpp"
 #include "manager.hpp"
@@ -168,6 +169,15 @@ static void hook_render_texture(void* thisptr, SP<Render::ITexture> tex, const C
     CRegion fullDamage = CBox {0, 0, renderData.pMonitor->m_transformedSize.x, renderData.pMonitor->m_transformedSize.y};
     data.damage = &fullDamage;
     data.clipRegion = {};
+
+    // Corner radius is a uniform in final screen pixels -- the modif moves the quad but not the
+    // radius -- so a shrunken window keeps its full-size corners and reads as a lozenge. Scale
+    // it down with everything else, or force a flat value if the user asked for one.
+    const float configuredRound = HSConfig::value<Config::FLOAT>("window_rounding");
+    if (configuredRound >= 0.F)
+        data.round = (int)std::round(configuredRound * renderData.pMonitor->m_scale);
+    else
+        data.round = (int)std::round(data.round * modif.combinedScale());
 
     const CBox savedClip = renderData.clipBox;
     renderData.clipBox = CBox {};
@@ -422,10 +432,22 @@ static void init_config() {
     ADD_CONFIG(CColorValue, "active_row_color", "band behind the selected workspace row; alpha 0 disables it", 0x00000000);
     ADD_CONFIG(CIntValue, "render_background_layers", "draw background/bottom layer surfaces (your wallpaper), unscaled and unmoved", 1);
     ADD_CONFIG(CIntValue, "render_top_layers", "draw top/overlay layer surfaces (your bar), unscaled and unmoved", 1);
-    ADD_CONFIG(CFloatValue, "active_border_size", "ring around the centred window of the selected row, 0 to disable", 2.F);
+    ADD_CONFIG(CFloatValue, "active_border_size", "the centre rectangle: ring around the centred window of the selected row, 0 to disable", 2.F);
     ADD_CONFIG(CColorValue, "active_border_color", "colour of that ring", 0xFF3399FF);
+    ADD_CONFIG(CFloatValue, "active_border_rounding", "corner radius of the centre rectangle; -1 follows the window's own rounding", -1.F);
     ADD_CONFIG(CFloatValue, "hover_border_size", "border around the hovered window, 0 to disable", 3.F);
     ADD_CONFIG(CColorValue, "hover_border_color", "border colour for the hovered window", 0xFF88BBFF);
+    ADD_CONFIG(CFloatValue, "hover_border_rounding", "corner radius of the hover border; -1 follows the window's own rounding", -1.F);
+    ADD_CONFIG(CFloatValue, "window_rounding", "corner radius of windows in the overview; -1 scales each window's own rounding by the zoom", -1.F);
+
+    // Motion
+    ADD_CONFIG(CStringValue, "animation_curve",
+               "\"smooth\" (no overshoot), \"spring\", \"inherit\" (your `workspaces` curve), or the name of any bezier or spring you defined", "smooth");
+    ADD_CONFIG(CFloatValue, "animation_speed", "duration in deciseconds -- higher is slower. Ignored by springs", 4.F);
+    ADD_CONFIG(CIntValue, "animation_enabled", "0 snaps instantly with no animation at all", 1);
+    ADD_CONFIG(CFloatValue, "spring_stiffness", "spring constant, for animation_curve = spring", 250.F);
+    ADD_CONFIG(CFloatValue, "spring_damping", "spring damping -- raise it to take the bounce out", 25.F);
+    ADD_CONFIG(CFloatValue, "spring_mass", "spring mass", 1.F);
 
     // Which workspaces get a row
     ADD_CONFIG(CIntValue, "show_empty", "also show empty workspaces you are not on", 0);
@@ -455,6 +477,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Hyprland's plugin loader already refuses a plugin built against a different ABI string,
     // so there is nothing useful to re-check here.
     init_config();
+    hs_refresh_animation_config();
     init_hooks();
     add_dispatchers();
     register_callbacks();

@@ -74,7 +74,21 @@ class HSView {
     // the tape sliding through a stationary centre rather than snapping to it.
     PHLANIMVAR<float> m_anchorX;
     WORKSPACEID m_selected = WORKSPACE_INVALID;
+
+    // The centre rectangle, in unscaled workspace pixels: the vertical centre of the anchor
+    // window and its size. Both are animated so a change of anchor morphs the rectangle in
+    // place; its horizontal position is never stored, because it is always the middle of the
+    // output. See HSView::centerBox.
+    PHLANIMVAR<float> m_centerY;
+    PHLANIMVAR<Vector2D> m_centerSize;
+    bool m_centerValid = false;
+
     PHLWINDOWREF m_hovered;
+
+    // Hover only means anything once the pointer has actually moved. Walking the tape with the
+    // keyboard slides windows underneath a parked cursor, and highlighting whichever one drifts
+    // under it looks like a random window lighting up.
+    bool m_hoverArmed = false;
 
     // Window being dragged between workspaces. It is lifted out of its card and drawn under the
     // cursor instead, so the drop target is unambiguous.
@@ -90,6 +104,8 @@ class HSView {
     void onConfigReloaded();
 
     // Navigation.
+    void disarmHover();
+
     void selectRow(int delta);
     void selectWorkspace(WORKSPACEID id);
     void selectColumn(int delta);
@@ -103,6 +119,10 @@ class HSView {
     // Geometry.
     HSFrame frame() const;
     CBox windowBox(PHLWINDOW window, const HSCard& card, const HSFrame& frame) const;
+
+    // Where the anchor window comes to rest. Drawn instead of the anchor's live box so the
+    // rectangle never travels: it is the fixed reference the windows move to, not with.
+    CBox centerBox(const HSFrame& frame) const;
 
     std::optional<HSCard> cardAt(const Vector2D& global) const;
     PHLWINDOW windowAt(const Vector2D& global) const;
@@ -146,6 +166,9 @@ class HSView {
     // Follow the compositor and keep the selected row centred. Runs every frame, because the
     // workspace can change from outside the overview and rows can appear or disappear under it.
     void syncRow();
+
+    // Retarget the centre rectangle at whatever the selected row is anchored on.
+    void syncCenter(bool warp);
 };
 
 typedef SP<HSView> PHSVIEW;
