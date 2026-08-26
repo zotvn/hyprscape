@@ -1,0 +1,24 @@
+# hyprpm manifest.  https://wiki.hypr.land/Plugins/Development/Getting-Started/
+#
+#   hyprpm add https://github.com/cybergaz/hyprscape
+#   hyprpm enable hyprscape
+#
+# hyprpm clones this repo, builds Hyprland's headers for the version you are running, then runs
+# the `build` steps below with PKG_CONFIG_PATH pointed at those headers. `output` is the file it
+# collects afterwards, relative to the repo root.
+
+[repository]
+name = "hyprscape"
+authors = ["cybergaz"]
+
+# When hyprscape gains support for a second Hyprland release, pin the last commit that worked
+# for each older one here, so `hyprpm update` gives those users a build that still compiles:
+#   commit_pins = [
+#     ["<hyprland commit>", "<hyprscape commit>"],
+#   ]
+
+[hyprscape]
+description = "A niri-style zoom-out overview for Hyprland's scrolling layout"
+authors = ["cybergaz"]
+output = "libhyprscape.so"
+build = ["make clean", "make all"]

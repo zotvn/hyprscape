@@ -1,0 +1,80 @@
+name: build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  # A Hyprland plugin only compiles against one release series, so the useful signal is not
+  # "did my commit break it" but "has Hyprland moved on without me". Check weekly.
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  arch:
+    name: Arch (${{ matrix.hyprland }})
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        hyprland: [repo]
+    steps:
+      - name: Install Hyprland and toolchain
+        run: |
+          pacman -Syu --noconfirm git gcc make pkgconf hyprland
+          pkg-config --modversion hyprland
+
+      - uses: actions/checkout@v4
+
+      - name: make check
+        run: make check
+
+      - name: make all
+        run: make all
+
+      - name: Confirm the plugin exports what Hyprland asks for
+        run: |
+          test -f libhyprscape.so
+          for sym in PLUGIN_API_VERSION PLUGIN_INIT PLUGIN_EXIT; do
+            nm -D --defined-only libhyprscape.so | grep -q "$sym" \
+              || { echo "missing export: $sym"; exit 1; }
+          done
+          # STB_GNU_UNIQUE symbols would pin the .so into the process and break plugin unload.
+          if nm -D --defined-only libhyprscape.so | grep -q ' u '; then
+            echo "STB_GNU_UNIQUE symbols present -- --no-gnu-unique did not take effect"; exit 1
+          fi
+
+  nix:
+    name: Nix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+      - run: nix flake check --no-build
+      - run: nix build .#hyprscape --print-build-logs
+
+  manifest:
+    name: hyprpm manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate hyprpm.toml
+        run: |
+          python3 - <<'PY'
+          import tomllib, sys
+          m = tomllib.load(open('hyprpm.toml','rb'))
+          assert 'repository' in m, "missing [repository]"
+          plugins = [k for k in m if k != 'repository']
+          assert plugins, "no plugin sections"
+          for p in plugins:
+              for key in ('description', 'output', 'build'):
+                  assert key in m[p], f"{p}: missing {key}"
+              assert m[p]['build'], f"{p}: empty build steps"
+              # hyprpm looks for `output` relative to the repo root after running the build.
+              assert not m[p]['output'].startswith('/'), f"{p}: output must be relative"
+          print("hyprpm.toml ok:", ", ".join(plugins))
+          PY

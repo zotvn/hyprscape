@@ -4,7 +4,10 @@ A [niri](https://github.com/YaLTeR/niri)-style **Overview** for Hyprland's built
 layout: one keybind zooms the desktop out so you can see the whole scroll tape at once, with
 every window still exactly where it really is.
 
-Built and tested against **Hyprland 0.55.4**.
+[![build](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml/badge.svg)](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml)
+
+**Hyprland 0.55.x** · install with [hyprpm](#hyprpm-any-distribution), a
+[PKGBUILD](#arch-pkgbuild), the [Nix flake](#nixos--home-manager), or [make](#by-hand).
 
 ```
         ┌──────────────────── workspace 1 ────────────────────┐
@@ -46,41 +49,114 @@ hyprscape drops the grid entirely:
 - **it is a real zoom.** At progress 0 the transform is the identity, so opening the overview is a
   continuous zoom-out from your desktop rather than a cut to a different screen.
 
-## Build
-
-The plugin ABI is tied to one exact Hyprland build, so it must be compiled against the Hyprland
-you actually run.
-
-### Quick, on the machine that runs Hyprland
-
-```sh
-./build.sh          # → ./libhyprscape.so
-```
-
-`build.sh` finds the running compositor's version via `hyprctl`, locates that build's `-dev`
-output and derivation in the Nix store, and compiles inside its build environment. No pinning, no
-`PKG_CONFIG_PATH` fiddling, and it cannot silently build against the wrong Hyprland.
-
-### Nix
-
-```sh
-nix build .#hyprscape
-```
-
-### Anywhere `pkg-config hyprland` already works
-
-```sh
-make
-```
-
 ## Install
 
-> **Unload hyprtasking first.** Both plugins hook `renderWorkspace`; running them together gives
-> you whichever one wins the race.
+hyprscape is a Hyprland **plugin**, and a Hyprland plugin is locked to one exact compositor
+build: the loader compares a hash and refuses anything else. So the only question any install
+method has to answer is *"how do I compile against the Hyprland I am actually running, and
+recompile when it changes?"* Pick whichever answer suits your distribution.
 
-### Home Manager (Lua config)
+| You run | Use | Rebuilds itself on a Hyprland update |
+| --- | --- | --- |
+| Arch, Fedora, openSUSE, Gentoo, Debian, anything else | [**hyprpm**](#hyprpm-any-distribution) | yes |
+| Arch, and you would rather have a package | [**PKGBUILD**](#arch-pkgbuild) | no — rebuild it yourself |
+| NixOS / Home Manager | [**the flake**](#nixos--home-manager) | yes, on the next `switch` |
+| Something else, by hand | [**make**](#by-hand) | no |
+
+> **Unload hyprtasking first if you have it.** Both plugins hook `renderWorkspace`; running them
+> together gives you whichever one wins the race.
+
+### hyprpm (any distribution)
+
+hyprpm ships with Hyprland. It fetches the headers matching *your* compositor, builds the plugin
+against them, and rebuilds every plugin for you whenever you update Hyprland — which is exactly
+the problem an ABI-locked plugin has.
+
+```sh
+hyprpm update                                            # once, to fetch/build headers
+hyprpm add https://github.com/cybergaz/hyprscape
+hyprpm enable hyprscape
+```
+
+Then add to your config so plugins load at startup, and bind the overview:
+
+```lua
+-- hyprland.lua
+hl.exec_once("hyprpm reload -n")
+hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
+```
+
+```conf
+# hyprland.conf
+exec-once = hyprpm reload -n
+bind = SUPER, U, hyprscape:toggle, all
+```
+
+After every Hyprland upgrade, run `hyprpm update`. hyprpm needs Hyprland's own build
+dependencies, because it compiles the headers from source:
+
+```sh
+# Arch
+sudo pacman -S --needed base-devel cmake cpio git meson ninja pkgconf
+
+# Fedora
+sudo dnf install @development-tools cmake cpio git meson ninja-build pkgconf
+
+# openSUSE
+sudo zypper install -t pattern devel_basis && sudo zypper install cmake cpio git meson ninja
+
+# Debian / Ubuntu
+sudo apt install build-essential cmake cpio git meson ninja-build pkg-config
+```
+
+If `hyprpm add` reports that the plugin failed to build, run it again with `-v`. A message saying
+hyprscape supports a different Hyprland series is the version guard doing its job — see
+[Compatibility](#compatibility).
+
+### Arch (PKGBUILD)
+
+A `PKGBUILD` is in [`packaging/arch/`](packaging/arch), for the tagged release and for git:
+
+```sh
+git clone https://github.com/cybergaz/hyprscape
+cd hyprscape/packaging/arch
+makepkg -si
+```
+
+It installs `/usr/lib/libhyprscape.so`. Load it the normal way:
+
+```lua
+hl.plugin.load("/usr/lib/libhyprscape.so")
+hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
+```
+
+```conf
+plugin = /usr/lib/libhyprscape.so
+bind = SUPER, U, hyprscape:toggle, all
+```
+
+**A package cannot know when Hyprland changes underneath it.** `pacman -Syu` will happily upgrade
+Hyprland and leave you with a plugin that no longer loads, and Hyprland will simply refuse it at
+startup. Rebuild the package after every Hyprland upgrade, or use hyprpm, which does that for you.
+
+### NixOS / Home Manager
+
+Add the input:
 
 ```nix
+{
+  inputs.hyprscape = {
+    url = "github:cybergaz/hyprscape";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+}
+```
+
+Then, in your Home Manager Hyprland config — passing the *same* Hyprland package your session
+runs, which is what keeps the ABI matched across every rebuild:
+
+```nix
+{ config, pkgs, inputs, ... }:
 {
   wayland.windowManager.hyprland.plugins = [
     (inputs.hyprscape.lib.mkHyprscape {
@@ -91,32 +167,78 @@ make
 }
 ```
 
-Then in your Lua config:
+Home Manager emits the `hl.plugin.load(...)` call for you, so all that is left is the bind:
 
 ```lua
 hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
-
--- Optional: only act when the overview is open.
-hl.bind("SUPER + SHIFT + U", function()
-    if hl.plugin.hyprscape.is_active() then
-        hl.plugin.hyprscape.close("")
-    end
-end)
 ```
 
-### Trying it without committing to it
+If you run the Hyprland from nixpkgs rather than from the Hyprland flake, the packaged output is
+already exactly that and takes no arguments:
+
+```nix
+wayland.windowManager.hyprland.plugins = [ inputs.hyprscape.packages.${pkgs.system}.hyprscape ];
+```
+
+There is also an overlay, if you would rather have `pkgs.hyprscape`:
+
+```nix
+nixpkgs.overlays = [ inputs.hyprscape.overlays.default ];
+```
+
+> Because plugin keys do not exist until `hl.plugin.load()` has actually run, a Lua config that
+> sets `plugin.hyprscape.*` values logs one "unknown config key" warning on the first parse pass
+> and then works. Harmless, but `hyprland --verify-config` will flag it.
+
+### By hand
+
+Any distribution where `pkg-config hyprland` resolves — that is, with Hyprland's headers
+installed:
 
 ```sh
-hyprctl plugin load /absolute/path/to/libhyprscape.so
+git clone https://github.com/cybergaz/hyprscape
+cd hyprscape
+make check          # what will it build against?
+make                # → ./libhyprscape.so
+make install        # → ~/.local/lib/libhyprscape.so   (PREFIX= to change)
+```
+
+```lua
+hl.plugin.load(os.getenv("HOME") .. "/.local/lib/libhyprscape.so")
+```
+
+Try it without committing to anything:
+
+```sh
+hyprctl plugin load  /absolute/path/to/libhyprscape.so
 hyprctl plugin unload /absolute/path/to/libhyprscape.so
 ```
 
-### Plain `hyprland.conf`
+**On NixOS**, there is no system-wide `pkg-config` entry for Hyprland, so `make` cannot work. Use
+the flake, or `./build.sh`, which finds the running compositor's derivation in the Nix store and
+compiles inside its build environment — no pinning, no `PKG_CONFIG_PATH` fiddling, and it cannot
+silently build against the wrong Hyprland.
 
+## Compatibility
+
+hyprscape hooks Hyprland's renderer by **mangled C++ symbol name**, which is how it can take over
+`renderWorkspace` without patching the compositor. The cost is that it is tied to one release
+series.
+
+| hyprscape | Hyprland |
+| --- | --- |
+| 0.2.x | 0.55.x |
+
+`make` refuses to build against anything else and says so, rather than producing a plugin that
+loads and then cannot find what it needs. If you want to try regardless:
+
+```sh
+make HYPRSCAPE_SKIP_VERSION_CHECK=1
 ```
-plugin = /absolute/path/to/libhyprscape.so
-bind = SUPER, U, hyprscape:toggle, all
-```
+
+Hyprland's own loader is the second line of defence: it stores a hash of the build a plugin was
+compiled against and refuses to load a mismatch, so the worst case is a plugin that does not
+load, not a broken session.
 
 ## Using it
 
@@ -372,11 +494,47 @@ copy, so a click focus would leave you focused on something you could not see.
 
 ## Limitations
 
-- Written for Hyprland **0.55.4**. It resolves several functions by mangled symbol, so a different
-  Hyprland will refuse to load it (loudly, at init) rather than misbehave.
+- Written for Hyprland **0.55.x**. It resolves several functions by mangled symbol, so a different
+  Hyprland is refused at build time by `make`, and by Hyprland's own loader if you force it.
 - Special workspaces (scratchpads) are not shown.
 - A workspace containing a genuinely fullscreen window is shown from its window positions, which
   the scrolling layout stops updating while fullscreen is active.
 - Multi-monitor is implemented but has only been exercised on a single output.
 - Windows are not vertically cropped to their card. In a scrolling layout columns fit the work
   area, so this is not visible in practice.
+
+## Development
+
+```sh
+nix develop            # or: install Hyprland's headers
+make check             # what would this build against?
+make                   # → ./libhyprscape.so
+./build.sh             # NixOS: compile inside the running Hyprland's own build env
+./test/nested.sh       # a throwaway nested Hyprland with the plugin loaded
+```
+
+`test/nested.sh` starts a second Hyprland inside your session with a minimal scrolling-layout
+config and a few terminals, so the plugin can be exercised without putting your real session at
+risk. Screenshot it with `WAYLAND_DISPLAY=wayland-2 grim out.png`.
+
+Hyprland's plugin API is undocumented; the compositor's own source is the reference. On a Nix
+system it is already unpacked in the store — find it with `fd -t f OpenGL.cpp /nix/store -d 6`.
+
+### Releasing
+
+1. Bump `version` in `flake.nix`, `pkgver` in `packaging/arch/PKGBUILD`, and the table in
+   [Compatibility](#compatibility); add a `CHANGELOG.md` entry.
+2. `git tag -a v0.2.0 -m 'hyprscape 0.2.0' && git push --tags`.
+3. When support for a new Hyprland series lands, add a `commit_pins` entry to `hyprpm.toml` for
+   the last commit that worked on the old one, so `hyprpm update` keeps building for people who
+   have not upgraded.
+
+## Contributing
+
+Issues and pull requests welcome. If you are reporting a rendering bug, `plugin:hyprscape:debug
+= 1` logs the box hyprscape computes for every window each frame, which is usually enough to tell
+a geometry bug from a drawing one.
+
+## License
+
+BSD-3-Clause. See [LICENSE](LICENSE).

@@ -13,22 +13,32 @@
     inherit (nixpkgs) lib;
     systems = ["x86_64-linux" "aarch64-linux"];
     forSystems = f: lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
+
+    version = "0.2.0";
   in {
-    # The plugin ABI is tied to one exact Hyprland build, so the derivation is parameterised by
-    # the Hyprland package instead of pinning one. Pass the very same Hyprland your session runs:
+    # A Hyprland plugin is ABI-locked to one exact Hyprland build -- the loader refuses anything
+    # else -- so the derivation takes the Hyprland package rather than pinning one. Pass the very
+    # same Hyprland your session runs:
     #
     #   hyprscape = inputs.hyprscape.lib.mkHyprscape {
     #     inherit pkgs;
-    #     hyprland = inputs.hyprland.packages.${system}.hyprland;
+    #     hyprland = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
     #   };
+    #
+    # If you run the Hyprland from nixpkgs, `inputs.hyprscape.packages.${system}.hyprscape` is
+    # already exactly that and needs no arguments.
     lib.mkHyprscape = {
       pkgs,
       hyprland ? pkgs.hyprland,
     }:
-      pkgs.stdenv.mkDerivation {
+      pkgs.stdenv.mkDerivation (finalAttrs: {
         pname = "hyprscape";
-        version = "0.1";
-        src = ./.;
+        inherit version;
+
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [./src ./Makefile];
+        };
 
         nativeBuildInputs = [pkgs.pkg-config] ++ hyprland.nativeBuildInputs;
         buildInputs = [hyprland] ++ hyprland.buildInputs;
@@ -38,15 +48,10 @@
         dontUseCmakeConfigure = true;
         dontConfigure = true;
 
-        buildPhase = ''
-          runHook preBuild
-          g++ -std=c++23 -shared -fPIC --no-gnu-unique -O2 \
-            -Wall -Wno-narrowing -Wno-unused-parameter -Wno-unused-variable \
-            $(pkg-config --cflags hyprland pixman-1 libdrm pangocairo libinput libudev wayland-server xkbcommon) \
-            -Isrc \
-            -o libhyprscape.so $(find src -name '*.cpp' | sort)
-          runHook postBuild
-        '';
+        # The Makefile's series check reads `pkg-config --modversion hyprland`, which here is
+        # whatever `hyprland` above provides -- so a mismatched Hyprland fails at build time with
+        # a message rather than at load time with a broken session.
+        makeFlags = ["all"];
 
         installPhase = ''
           runHook preInstall
@@ -55,12 +60,24 @@
           runHook postInstall
         '';
 
-        meta = with lib; {
+        passthru.hyprlandPackage = hyprland;
+
+        meta = {
           description = "A niri-style zoom-out overview for Hyprland's scrolling layout";
-          license = licenses.bsd3;
-          platforms = platforms.linux;
+          homepage = "https://github.com/cybergaz/hyprscape";
+          license = lib.licenses.bsd3;
+          platforms = lib.platforms.linux;
+          maintainers = [];
         };
+      });
+
+    # For `nixpkgs.overlays = [inputs.hyprscape.overlays.default];`
+    overlays.default = final: prev: {
+      hyprscape = self.lib.mkHyprscape {
+        pkgs = final;
+        hyprland = final.hyprland;
       };
+    };
 
     packages = forSystems (system: pkgs: rec {
       hyprscape = self.lib.mkHyprscape {inherit pkgs;};
@@ -70,8 +87,10 @@
     devShells = forSystems (system: pkgs: {
       default = pkgs.mkShell {
         inputsFrom = [pkgs.hyprland];
-        packages = [pkgs.pkg-config pkgs.clang-tools];
+        packages = [pkgs.pkg-config pkgs.clang-tools pkgs.gnumake];
       };
     });
+
+    formatter = forSystems (system: pkgs: pkgs.alejandra);
   };
 }

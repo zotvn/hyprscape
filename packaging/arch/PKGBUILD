@@ -1,0 +1,35 @@
+# Maintainer: cybergaz <kkanttechy@gmail.com>
+#
+# A Hyprland plugin is ABI-locked to the exact Hyprland build it was compiled against: the
+# loader compares a hash and refuses anything else. So this package MUST be rebuilt every time
+# `hyprland` is upgraded. If you would rather not think about that, use hyprpm, which rebuilds
+# its plugins for you on every Hyprland update:
+#
+#     hyprpm add https://github.com/cybergaz/hyprscape
+#     hyprpm enable hyprscape
+
+pkgname=hyprscape
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A niri-style zoom-out overview for Hyprland's scrolling layout"
+arch=('x86_64' 'aarch64')
+url="https://github.com/cybergaz/hyprscape"
+license=('BSD-3-Clause')
+depends=('hyprland')
+makedepends=('git' 'gcc' 'pkgconf' 'make')
+provides=('hyprscape')
+conflicts=('hyprscape-git')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  make all
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 libhyprscape.so "$pkgdir/usr/lib/libhyprscape.so"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
