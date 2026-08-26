@@ -26,8 +26,10 @@ PKGS          = hyprland
 PKGS         += $(shell $(PKG_CONFIG) --exists pixman-1 2>/dev/null && echo pixman-1)
 PKGS         += $(shell $(PKG_CONFIG) --exists pangocairo 2>/dev/null && echo pangocairo)
 
+HYPR_CFLAGS  := $(shell $(PKG_CONFIG) --cflags $(PKGS) 2>/dev/null)
+
 CXXFLAGS     += -std=c++23 -fPIC -O2 -Wall -Wno-narrowing -Wno-unused-parameter -Wno-unused-variable
-CXXFLAGS     += $(shell $(PKG_CONFIG) --cflags $(PKGS) 2>/dev/null) -Isrc
+CXXFLAGS     += $(HYPR_CFLAGS) -Isrc
 LDFLAGS      += -shared
 
 # --no-gnu-unique is not optional: STB_GNU_UNIQUE symbols pin a shared object into the process
@@ -59,6 +61,18 @@ ifndef HYPRSCAPE_SKIP_VERSION_CHECK
 	  echo "      hyprpm add https://github.com/cybergaz/hyprscape"; \
 	  echo ""; \
 	  echo "  On NixOS, use ./build.sh or the flake instead."; \
+	  echo ""; \
+	  exit 1; \
+	fi
+	@if [ -z "$(HYPR_CFLAGS)" ]; then \
+	  echo ""; \
+	  echo "  hyprscape: found hyprland.pc (version $(HYPRLAND_VERSION)), but pkg-config could"; \
+	  echo "  not resolve what it depends on. hyprland.pc Requires aquamarine, hyprcursor,"; \
+	  echo "  hyprgraphics, hyprlang, hyprutils, libdrm, egl, cairo, xkbcommon, libinput and"; \
+	  echo "  wayland-server -- one of those is missing, or PKG_CONFIG_PATH was replaced rather"; \
+	  echo "  than appended to. pkg-config says:"; \
+	  echo ""; \
+	  $(PKG_CONFIG) --print-errors --cflags $(PKGS) 2>&1 | sed 's/^/      /'; \
 	  echo ""; \
 	  exit 1; \
 	fi

@@ -25,6 +25,7 @@
 #include "globals.hpp"
 #include "manager.hpp"
 #include "types.hpp"
+#include "version.hpp"
 #include "view.hpp"
 
 using namespace Config::Values;
@@ -487,7 +488,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     hs_log("initialized");
 
-    return {"hyprscape", "A niri-style zoom-out overview for Hyprland's scrolling layout", "hyprscape", "0.1"};
+    return {"hyprscape", "A niri-style zoom-out overview for Hyprland's scrolling layout", "hyprscape", HYPRSCAPE_VERSION};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
