@@ -58,9 +58,9 @@ recompile when it changes?"* Pick whichever answer suits your distribution.
 
 | You run | Use | Rebuilds itself on a Hyprland update |
 | --- | --- | --- |
-| Arch, Fedora, openSUSE, Gentoo, Debian, anything else | [**hyprpm**](#hyprpm-any-distribution) | yes |
+| Arch, Fedora, openSUSE, Gentoo, Debian, anything else | [**hyprpm**](#hyprpm-any-distribution) | `hyprpm update` does it, for every plugin at once |
 | Arch, and you would rather have a package | [**PKGBUILD**](#arch-pkgbuild) | no — rebuild it yourself |
-| NixOS / Home Manager | [**the flake**](#nixos--home-manager) | yes, on the next `switch` |
+| NixOS / Home Manager | [**the flake**](#nixos--home-manager) | yes, automatically, on the next `switch` |
 | Something else, by hand | [**make**](#by-hand) | no |
 
 > **Unload hyprtasking first if you have it.** Both plugins hook `renderWorkspace`; running them
@@ -68,9 +68,9 @@ recompile when it changes?"* Pick whichever answer suits your distribution.
 
 ### hyprpm (any distribution)
 
-hyprpm ships with Hyprland. It fetches the headers matching *your* compositor, builds the plugin
-against them, and rebuilds every plugin for you whenever you update Hyprland — which is exactly
-the problem an ABI-locked plugin has.
+hyprpm ships with Hyprland. It fetches the headers matching *your* compositor and builds the
+plugin against them, and after a Hyprland upgrade one `hyprpm update` rebuilds every plugin you
+have installed — which is exactly the chore an ABI-locked plugin creates.
 
 ```sh
 hyprpm update                                            # once, to fetch/build headers
@@ -92,8 +92,12 @@ exec-once = hyprpm reload -n
 bind = SUPER, U, hyprscape:toggle, all
 ```
 
-After every Hyprland upgrade, run `hyprpm update`. hyprpm needs Hyprland's own build
-dependencies, because it compiles the headers from source:
+**After every Hyprland upgrade, run `hyprpm update`.** Until you do, Hyprland will refuse to
+load the plugin, because it was built against the previous version.
+
+hyprpm compiles Hyprland's headers from source, so it needs a toolchain. It checks for `cpio`,
+`cmake`, `pkg-config`, `g++`, `gcc` and `git` up front, and the cmake configure step wants
+Hyprland's own build dependencies on top of that:
 
 ```sh
 # Arch
@@ -108,6 +112,9 @@ sudo zypper install -t pattern devel_basis && sudo zypper install cmake cpio git
 # Debian / Ubuntu
 sudo apt install build-essential cmake cpio git meson ninja-build pkg-config
 ```
+
+hyprpm also works on NixOS — it wraps its build steps in `nix develop` — but the flake below is
+the better fit there.
 
 If `hyprpm add` reports that the plugin failed to build, run it again with `-v`. A message saying
 hyprscape supports a different Hyprland series is the version guard doing its job — see
