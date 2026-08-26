@@ -81,8 +81,8 @@ hyprpm enable hyprscape
 Then add to your config so plugins load at startup, and bind the overview:
 
 ```lua
--- hyprland.lua
-hl.exec_once("hyprpm reload -n")
+-- hyprland.lua  (there is no hl.exec_once; run it from the start event)
+hl.on("hyprland.start", function() hl.exec_cmd("hyprpm reload -n") end)
 hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
 ```
 
