@@ -9,22 +9,13 @@ every window still exactly where it really is.
 **Hyprland 0.55.x** · install with [hyprpm](#hyprpm-any-distribution), a
 [PKGBUILD](#arch-pkgbuild), the [Nix flake](#nixos--home-manager), or [make](#by-hand).
 
-```
-        ┌──────────────────── workspace 1 ────────────────────┐
-   ┌────┼────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────┼───┐
-   │ ff │    │  │  term   │  │  term   │  │  editor │  │ chat │   │     ← the real scroll tape,
-   └────┼────┘  └─────────┘  └─────────┘  └─────────┘  └──────┼───┘        spilling past the
-        └──────────── the workspace's viewport ──────────────┘            viewport on both sides
+![hyprscape overview](assets/demo.png)
 
-        ┌──────────────────── workspace 3 ────────────────────┐
-        │   ┌─────────┐  ┌───────────────────┐                │
-        │   │ browser │  │      terminal     │                │
-        │   └─────────┘  └───────────────────┘                │
-        └─────────────────────────────────────────────────────┘
-
-        ┌──────────────────── new workspace ──────────────────┐
-        └─────────────────────────────────────────────────────┘
-```
+One row per workspace that actually exists, each one a horizontal scroll tape. The tapes run past
+the edge of the screen on both sides — that overflow *is* the layout, made visible. The ringed
+window in the middle row is the centre: every tape is anchored so its focused window sits there,
+and scrolling columns slides the tape through it rather than moving it. The bar and the wallpaper
+are drawn unscaled, exactly where they always are.
 
 ## Why not hyprtasking?
 
