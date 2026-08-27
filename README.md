@@ -1,8 +1,6 @@
 # hyprscape
 
-A [niri](https://github.com/YaLTeR/niri)-style **Overview** for Hyprland's built-in scrolling
-layout: one keybind zooms the desktop out so you can see the whole scroll tape at once, with
-every window still exactly where it really is.
+A [niri](https://github.com/YaLTeR/niri)-style **Overview** for Hyprland's built-in scrolling layout.     
 
 [![build](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml/badge.svg)](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml)
 
@@ -10,35 +8,6 @@ every window still exactly where it really is.
 [PKGBUILD](#arch-pkgbuild), the [Nix flake](#nixos--home-manager), or [make](#by-hand).
 
 ![hyprscape overview](assets/demo.png)
-
-One row per workspace that actually exists, each one a horizontal scroll tape. The tapes run past
-the edge of the screen on both sides — that overflow *is* the layout, made visible. The ringed
-window in the middle row is the centre: every tape is anchored so its focused window sits there,
-and scrolling columns slides the tape through it rather than moving it. The bar and the wallpaper
-are drawn unscaled, exactly where they always are.
-
-## Why not hyprtasking?
-
-hyprtasking lays workspaces out on a fixed `rows × cols` grid. That model has no idea what a
-scrolling layout is:
-
-- it draws every grid cell, so 2 real workspaces become 6 tiles of mostly nothing;
-- each tile is only one screenful wide, so the columns you have scrolled off-screen spill out of
-  their tile and land on top of the neighbouring workspace.
-
-hyprscape drops the grid entirely:
-
-- **one row per workspace that actually exists**, sorted by id — never a phantom tile;
-- **workspaces stack vertically**, one horizontal tape each, exactly like niri;
-- **windows keep their true tape position.** Columns scrolled off the viewport render *outside*
-  the workspace card, to its left and right. That overflow is the feature — it is what makes the
-  tape visible;
-- **the centre of the screen is a fixed reference.** Each row is anchored on the window it was
-  focused on when you opened the overview, so that window sits dead centre with its earlier
-  columns to the left. Scrolling columns slides the tape *through* that centre; the centre itself
-  never moves. Rows are anchored independently, so scrolling one workspace never shifts another;
-- **it is a real zoom.** At progress 0 the transform is the identity, so opening the overview is a
-  continuous zoom-out from your desktop rather than a cut to a different screen.
 
 ## Install
 
