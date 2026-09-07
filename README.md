@@ -20,7 +20,7 @@ recompile when it changes?"* Pick whichever answer suits your distribution.
 | --- | --- | --- |
 | Arch, Fedora, openSUSE, Gentoo, Debian, anything else | [**hyprpm**](#hyprpm-any-distribution) | `hyprpm update` does it, for every plugin at once |
 | Arch, and you would rather have a package | [**PKGBUILD**](#arch-pkgbuild) | no — rebuild it yourself |
-| NixOS / Home Manager | [**the flake**](#nixos--home-manager) | yes, automatically, on the next `switch` |
+| NixOS, with or without Home Manager | [**the flake**](#nixos--home-manager) | yes, automatically, on the next `switch` |
 | Something else, by hand | [**make**](#by-hand) | no |
 
 > **Unload hyprtasking first if you have it.** Both plugins hook `renderWorkspace`; running them
@@ -77,8 +77,7 @@ hyprpm also works on NixOS — it wraps its build steps in `nix develop` — but
 the better fit there.
 
 If `hyprpm add` reports that the plugin failed to build, run it again with `-v`. A message saying
-hyprscape supports a different Hyprland series is the version guard doing its job — see
-[Compatibility](#compatibility).
+hyprscape supports a different Hyprland series is the version guard doing its job.     
 
 ### Arch (PKGBUILD)
 
@@ -108,54 +107,101 @@ startup. Rebuild the package after every Hyprland upgrade, or use hyprpm, which 
 
 ### NixOS / Home Manager
 
-Add the input:
+Nix compiles the plugin against the exact Hyprland your system runs, and again on every rebuild,
+so the ABI cannot drift. Add the input:
 
 ```nix
-{
-  inputs.hyprscape = {
-    url = "github:cybergaz/hyprscape";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-}
+inputs.hyprscape = {
+  url = "github:cybergaz/hyprscape";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
 ```
 
-Then, in your Home Manager Hyprland config — passing the *same* Hyprland package your session
-runs, which is what keeps the ABI matched across every rebuild:
+Then pick a branch by **who owns your Hyprland** — not by whether you use Home Manager for other
+things.
+
+> `wayland.windowManager.hyprland.plugins` does nothing unless that module's own `enable` is
+> `true`. Home Manager wraps it in `mkIf cfg.enable`, so otherwise the list is dropped in
+> silence: no error, nothing built. If Hyprland comes from `programs.hyprland` and you write
+> `~/.config/hypr` yourself, take the first branch.
+
+#### Hyprland from `programs.hyprland`, config written by hand
+
+In your NixOS module, with `config` in its argument set:
 
 ```nix
-{ config, pkgs, inputs, ... }:
-{
-  wayland.windowManager.hyprland.plugins = [
+environment.systemPackages = [
+  (inputs.hyprscape.lib.mkHyprscape {
+    inherit pkgs;
+    hyprland = config.programs.hyprland.package;
+  })
+];
+```
+
+Not `pkgs.hyprland` — the module applies your `xwayland` setting to that option, so reading it
+back gives the Hyprland that actually launches. If you already assign `environment.systemPackages`
+elsewhere in the same file, append with `++` rather than assigning it twice.
+
+The library then sits at a stable, hash-free path you can hard-code:
+
+```lua
+hl.plugin.load("/run/current-system/sw/lib/libhyprscape.so")
+hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
+```
+
+```conf
+plugin = /run/current-system/sw/lib/libhyprscape.so
+bind = SUPER, U, hyprscape:toggle, all
+```
+
+`hl.plugin.load()` only records the path — the `dlopen` happens after the config finishes — so it
+can live in any of your Lua files, in any order. Rebuild, then log out, or load it into the
+session you are in: `hyprctl plugin load /run/current-system/sw/lib/libhyprscape.so`.
+
+#### Home Manager owns Hyprland
+
+```nix
+wayland.windowManager.hyprland = {
+  enable = true;                    # required, see above
+  plugins = [
     (inputs.hyprscape.lib.mkHyprscape {
       inherit pkgs;
       hyprland = config.wayland.windowManager.hyprland.package;
     })
   ];
-}
+};
 ```
 
-Home Manager emits the `hl.plugin.load(...)` call for you, so all that is left is the bind:
+Home Manager loads it for you — as a `hyprctl plugin load` startup command rather than
+`hl.plugin.load()`, so the plugin arrives *after* your config is parsed. Bind through a function
+and that never matters:
 
 ```lua
 hl.bind("SUPER + U", function() hl.plugin.hyprscape.toggle("all") end)
 ```
 
-If you run the Hyprland from nixpkgs rather than from the Hyprland flake, the packaged output is
-already exactly that and takes no arguments:
+If you set that module's `package = null` because Hyprland comes from NixOS, pass
+`osConfig.programs.hyprland.package` instead; `null` will not build.
+
+#### Variations
+
+Running the Hyprland flake rather than nixpkgs'? Pass the same package you give your Hyprland
+module:
 
 ```nix
-wayland.windowManager.hyprland.plugins = [ inputs.hyprscape.packages.${pkgs.system}.hyprscape ];
+hyprland = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
 ```
 
-There is also an overlay, if you would rather have `pkgs.hyprscape`:
+Running plain `pkgs.hyprland`? Then the packaged output already *is* that build and takes no
+arguments — `inputs.hyprscape.packages.${pkgs.stdenv.hostPlatform.system}.hyprscape` — and
+`nixpkgs.overlays = [ inputs.hyprscape.overlays.default ];` gets you `pkgs.hyprscape`.
 
-```nix
-nixpkgs.overlays = [ inputs.hyprscape.overlays.default ];
-```
+To try it against the running compositor without touching your config, clone and run `./build.sh`,
+then `hyprctl plugin load "$PWD/libhyprscape.so"`.
 
-> Because plugin keys do not exist until `hl.plugin.load()` has actually run, a Lua config that
-> sets `plugin.hyprscape.*` values logs one "unknown config key" warning on the first parse pass
-> and then works. Harmless, but `hyprland --verify-config` will flag it.
+> Because plugin keys do not exist until the plugin is open, a Lua config that sets
+> `plugin.hyprscape.*` values logs one "unknown config key" warning on the first parse pass and
+> then works. Harmless, but `hyprland --verify-config` will flag it.
 
 ### By hand
 
@@ -181,31 +227,8 @@ hyprctl plugin load  /absolute/path/to/libhyprscape.so
 hyprctl plugin unload /absolute/path/to/libhyprscape.so
 ```
 
-**On NixOS**, there is no system-wide `pkg-config` entry for Hyprland, so `make` cannot work. Use
-the flake, or `./build.sh`, which finds the running compositor's derivation in the Nix store and
-compiles inside its build environment — no pinning, no `PKG_CONFIG_PATH` fiddling, and it cannot
-silently build against the wrong Hyprland.
-
-## Compatibility
-
-hyprscape hooks Hyprland's renderer by **mangled C++ symbol name**, which is how it can take over
-`renderWorkspace` without patching the compositor. The cost is that it is tied to one release
-series.
-
-| hyprscape | Hyprland |
-| --- | --- |
-| 0.2.x | 0.55.x |
-
-`make` refuses to build against anything else and says so, rather than producing a plugin that
-loads and then cannot find what it needs. If you want to try regardless:
-
-```sh
-make HYPRSCAPE_SKIP_VERSION_CHECK=1
-```
-
-Hyprland's own loader is the second line of defence: it stores a hash of the build a plugin was
-compiled against and refuses to load a mismatch, so the worst case is a plugin that does not
-load, not a broken session.
+**On NixOS, `make` cannot work** — there is no system-wide `pkg-config` entry for Hyprland. Use
+[the flake](#nixos--home-manager), or `./build.sh` for a quick throwaway build.
 
 ## Using it
 
@@ -415,50 +438,6 @@ hl.config({ plugin = { hyprscape = {
 
 If the name matches nothing, hyprscape logs once and falls back to `smooth`.
 
-## How it works
-
-`renderWorkspace` is hooked; while the overview is up, hyprscape draws the monitor itself instead.
-
-For each workspace row it pushes a single render modifier that maps that workspace's coordinate
-space onto the row, then walks the workspace's windows in Hyprland's own z-order
-(tiled → popups → floating) calling `renderWindow` directly. Because the modifier covers the whole
-row rather than a clipped tile, a window scrolled off the viewport simply lands beside its row,
-which is exactly the overflow we want.
-
-The horizontal placement of each row is one number: the distance from the centre of the screen to
-the centre of that workspace's *anchor column*. Anchors are captured when the overview opens and
-only change when you scroll columns, so the centre is a stationary reference and the tapes are
-what move. Fading that offset in with the open animation is what keeps progress 0 a pixel-exact
-identity transform.
-
-Layer surfaces are drawn outside the modifier entirely: the wallpaper stays put behind the rows
-and the bar stays put in front of them, at their real sizes.
-
-Three details that are easy to get wrong and are handled explicitly:
-
-- **Off-viewport columns.** The render pass hands each surface `frameDamage ∩ its own
-  untransformed box`. For a column scrolled off the viewport that intersection is empty and the
-  surface is dropped before the modifier ever gets a chance to move it on screen — which caps you
-  at the two or three columns nearest the viewport. hyprscape widens the frame damage well past
-  the monitor for the duration of its own pass.
-- **Slid-out workspaces.** Hyprland parks a non-visible workspace's `m_renderOffset` at roughly a
-  screen width, and `renderWindow` adds it to every window position. hyprscape folds that offset
-  into each card's source origin so it cancels exactly.
-- **Faded-out workspaces.** With a `slidefade*` workspace animation — the default in many configs —
-  a hidden workspace's `m_alpha` sits at `0`, and every surface is multiplied by it. A scoped guard
-  neutralises it for the duration of the draw, writing through the animated variable's value rather
-  than its goal so an in-flight animation is left alone.
-- **Scissors under a transform.** Hyprland applies the render modifier to the quads it draws but
-  not to the regions it derives scissors and blur samples from, so borders vanish and blur lands in
-  the wrong place. `renderTexture`, both `renderBorder` overloads and `shouldUseNewBlurOptimizations`
-  are hooked to keep those paths in the same coordinate space.
-
-Column navigation is pure overview state — an index into that workspace's own tape — so it works on
-any row rather than only on whichever workspace the compositor considers active. Selecting anything
-focuses it for real, with `FOCUS_REASON_KEYBIND`: the scrolling layout treats a `CLICK` focus as
-"only scroll if the pointer is already over the window", which can never be true of a zoomed-out
-copy, so a click focus would leave you focused on something you could not see.
-
 ## Limitations
 
 - Written for Hyprland **0.55.x**. It resolves several functions by mangled symbol, so a different
@@ -486,15 +465,6 @@ risk. Screenshot it with `WAYLAND_DISPLAY=wayland-2 grim out.png`.
 
 Hyprland's plugin API is undocumented; the compositor's own source is the reference. On a Nix
 system it is already unpacked in the store — find it with `fd -t f OpenGL.cpp /nix/store -d 6`.
-
-### Releasing
-
-1. Bump `version` in `flake.nix`, `pkgver` in `packaging/arch/PKGBUILD`, and the table in
-   [Compatibility](#compatibility); add a `CHANGELOG.md` entry.
-2. `git tag -a v0.2.0 -m 'hyprscape 0.2.0' && git push --tags`.
-3. When support for a new Hyprland series lands, add a `commit_pins` entry to `hyprpm.toml` for
-   the last commit that worked on the old one, so `hyprpm update` keeps building for people who
-   have not upgraded.
 
 ## Contributing
 
