@@ -4,7 +4,7 @@ A [niri](https://github.com/YaLTeR/niri)-style **Overview** for Hyprland's built
 
 [![build](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml/badge.svg)](https://github.com/cybergaz/hyprscape/actions/workflows/build.yml)
 
-**Hyprland 0.55.x** · install with [hyprpm](#hyprpm-any-distribution), a
+**Hyprland 0.56.x** · install with [hyprpm](#hyprpm-any-distribution), a
 [PKGBUILD](#arch-pkgbuild), the [Nix flake](#nixos--home-manager), or [make](#by-hand).
 
 ![hyprscape overview](assets/demo.png)
@@ -194,7 +194,7 @@ series.
 
 | hyprscape | Hyprland |
 | --- | --- |
-| 0.2.x | 0.55.x |
+| 0.2.x | 0.56.x |
 
 `make` refuses to build against anything else and says so, rather than producing a plugin that
 loads and then cannot find what it needs. If you want to try regardless:
@@ -461,7 +461,7 @@ copy, so a click focus would leave you focused on something you could not see.
 
 ## Limitations
 
-- Written for Hyprland **0.55.x**. It resolves several functions by mangled symbol, so a different
+- Written for Hyprland **0.56.x**. It resolves several functions by mangled symbol, so a different
   Hyprland is refused at build time by `make`, and by Hyprland's own loader if you force it.
 - Special workspaces (scratchpads) are not shown.
 - A workspace containing a genuinely fullscreen window is shown from its window positions, which

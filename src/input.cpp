@@ -4,7 +4,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
@@ -61,7 +61,7 @@ void HSManager::updateHover() {
 
     if (const auto monitor = view->monitor()) {
         g_pHyprRenderer->damageMonitor(monitor);
-        g_pCompositor->scheduleFrameForMonitor(monitor);
+        monitor->scheduleFrame();
     }
 }
 
@@ -93,7 +93,7 @@ bool HSManager::onMouseMove() {
     if (view->m_dragged) {
         if (const auto monitor = view->monitor()) {
             g_pHyprRenderer->damageMonitor(monitor);
-            g_pCompositor->scheduleFrameForMonitor(monitor);
+            monitor->scheduleFrame();
         }
         return true;
     }
@@ -286,7 +286,7 @@ bool HSManager::swipeUpdate(const IPointer::SSwipeUpdateEvent& event) {
 
         if (const auto monitor = view->monitor()) {
             g_pHyprRenderer->damageMonitor(monitor);
-            g_pCompositor->scheduleFrameForMonitor(monitor);
+            monitor->scheduleFrame();
         }
         return true;
     }

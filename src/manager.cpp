@@ -3,7 +3,9 @@
 #include <algorithm>
 
 #include <hyprland/src/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 
 #include "anim.hpp"
 #include "config.hpp"
@@ -13,7 +15,7 @@ void HSManager::rebuildViews() {
     // Drop views whose monitor is gone, add one for every monitor we do not have yet.
     std::erase_if(m_views, [](const PHSVIEW& v) { return !v || !v->monitor(); });
 
-    for (const auto& monitor : g_pCompositor->m_monitors) {
+    for (const auto& monitor : State::monitorState()->monitors()) {
         if (!monitor || monitor->m_id == MONITOR_INVALID)
             continue;
         if (viewForMonitor(monitor))
@@ -37,7 +39,7 @@ PHSVIEW HSManager::viewForMonitor(PHLMONITOR monitor) const {
 }
 
 PHSVIEW HSManager::viewFromCursor() const {
-    return viewForMonitor(g_pCompositor->getMonitorFromCursor());
+    return viewForMonitor(State::monitorState()->query().vec(g_pInputManager->getMouseCoordsInternal()).run());
 }
 
 bool HSManager::anyRendering() const {

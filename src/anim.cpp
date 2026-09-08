@@ -4,7 +4,7 @@
 #include <string>
 
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
-#include <hyprland/src/managers/animation/AnimationManager.hpp>
+#include <hyprland/src/animation/AnimationManager.hpp>
 #include <hyprutils/math/Vector2D.hpp>
 
 #include "config.hpp"
@@ -25,10 +25,10 @@ SP<SAnimationPropertyConfig> g_config;
 // put back whenever they go missing. Registering the same name twice just overwrites it, and
 // this runs every frame, so the work is skipped unless something actually changed.
 void registerCurves() {
-    if (!g_pAnimationManager->bezierExists(SMOOTH_BEZIER)) {
+    if (!Animation::mgr()->bezierExists(SMOOTH_BEZIER)) {
         // easeOutCubic: decisive at the start, flat at the end, and -- unlike Hyprland's
         // `default` -- it never travels past its goal, which is what "not springy" means.
-        g_pAnimationManager->addBezierWithName(SMOOTH_BEZIER, Vector2D {0.33, 1.0}, Vector2D {0.68, 1.0});
+        Animation::mgr()->addBezierWithName(SMOOTH_BEZIER, Vector2D {0.33, 1.0}, Vector2D {0.68, 1.0});
     }
 
     SSpringCurve spring;
@@ -39,8 +39,8 @@ void registerCurves() {
     static SSpringCurve lastSpring {.stiffness = -1.F};
     const bool changed = spring.stiffness != lastSpring.stiffness || spring.damping != lastSpring.damping || spring.mass != lastSpring.mass;
 
-    if (changed || !g_pAnimationManager->springExists(SPRING_NAME)) {
-        g_pAnimationManager->addSpringWithName(SPRING_NAME, spring);
+    if (changed || !Animation::mgr()->springExists(SPRING_NAME)) {
+        Animation::mgr()->addSpringWithName(SPRING_NAME, spring);
         lastSpring = spring;
     }
 }
@@ -55,12 +55,12 @@ std::string resolveCurve(const std::string& name) {
     // Anything else names a curve from the user's own config -- hl.curve("wind", ...) or a
     // spring they defined -- so they can hand the overview any feel they already like.
     if (name.starts_with(SPRING_PREFIX)) {
-        if (g_pAnimationManager->springExists(name.substr(SPRING_PREFIX.size())))
+        if (Animation::mgr()->springExists(name.substr(SPRING_PREFIX.size())))
             return name;
     } else {
-        if (g_pAnimationManager->springExists(name))
+        if (Animation::mgr()->springExists(name))
             return std::string {SPRING_PREFIX} + name;
-        if (g_pAnimationManager->bezierExists(name))
+        if (Animation::mgr()->bezierExists(name))
             return name;
     }
 

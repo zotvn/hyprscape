@@ -21,7 +21,7 @@ Vector2D hs_window_render_pos(PHLWINDOW window) {
         return {};
 
     // Mirrors Renderer.cpp:559 (REALPOS) and Renderer.cpp:625-626 (floating offset).
-    Vector2D pos = window->m_realPosition->value() + window->m_floatingOffset;
+    Vector2D pos = window->positionAnimation()->value() + window->m_floatingOffset;
 
     if (!window->m_pinned)
         pos += hs_workspace_render_offset(window->m_workspace);
@@ -70,7 +70,7 @@ void hs_render_window_at_box(PHLWINDOW window, PHLMONITOR monitor, const Time::s
     if (!window || !monitor || render_window == nullptr)
         return;
 
-    const Vector2D size = window->m_realSize->value();
+    const Vector2D size = window->sizeAnimation()->value();
     if (size.x < 1.0 || size.y < 1.0 || box.w < 1.0 || box.h < 1.0)
         return;
 

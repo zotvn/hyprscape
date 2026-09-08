@@ -39,7 +39,7 @@ CXXFLAGS     += --no-gnu-unique
 
 # The plugin hooks Hyprland by mangled symbol name, so it is tied to one release series. Building
 # against anything else produces a plugin that loads and then cannot find what it needs.
-SUPPORTED_HYPRLAND = 0.55
+SUPPORTED_HYPRLAND = 0.56
 HYPRLAND_VERSION  := $(shell $(PKG_CONFIG) --modversion hyprland 2>/dev/null)
 HYPRLAND_SERIES   := $(basename $(HYPRLAND_VERSION))
 

@@ -10,10 +10,14 @@
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
-#include <hyprland/src/managers/animation/AnimationManager.hpp>
-#include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
+#include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/animation/AnimationManager.hpp>
+#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/WorkspaceState.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
 #include <hyprland/src/render/pass/ClearPassElement.hpp>
@@ -96,17 +100,17 @@ HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
     // overview's feel is a config key rather than a side effect of the user's workspace curve.
     const auto cfg = hs_animation_config();
 
-    g_pAnimationManager->createAnimation(0.F, m_progress, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(0.F, m_centerY, cfg, AVARDAMAGE_NONE);
-    g_pAnimationManager->createAnimation(Vector2D {}, m_centerSize, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_progress, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_centerY, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(Vector2D {}, m_centerSize, cfg, AVARDAMAGE_NONE);
 }
 
 PHLMONITOR HSView::monitor() const {
-    return g_pCompositor->getMonitorFromID(m_monitorId);
+    return State::monitorState()->query().id(m_monitorId).run();
 }
 
 bool HSView::rendering() const {
@@ -130,7 +134,7 @@ std::vector<PHLWORKSPACE> HSView::visibleWorkspaces(WORKSPACEID& maxId) const {
 
     const bool showEmpty = HSConfig::value<Config::INTEGER>("show_empty");
 
-    for (const auto& ref : g_pCompositor->getWorkspaces()) {
+    for (const auto& ref : State::workspaceState()->workspaces()) {
         const auto ws = ref.lock();
         if (!ws || ws->inert() || ws->m_isSpecialWorkspace)
             continue;
@@ -141,7 +145,7 @@ std::vector<PHLWORKSPACE> HSView::visibleWorkspaces(WORKSPACEID& maxId) const {
 
         // This is the whole fix for hyprtasking's phantom tiles: a workspace earns a row by
         // having something on it, being where you are, or being where you are headed.
-        const bool occupied = ws->getWindows() > 0;
+        const bool occupied = ws->getWindowCount() > 0;
         const bool current = monitor->m_activeWorkspace == ws;
         const bool selected = ws->m_id == m_selected;
 
@@ -160,10 +164,12 @@ std::vector<PHLWINDOW> HSView::workspaceWindows(PHLWORKSPACE workspace) {
     if (!workspace)
         return out;
 
-    for (const auto& w : g_pCompositor->m_windows) {
+    for (const auto& w : Desktop::windowState()->windows()) {
         if (!w || w->m_workspace != workspace)
             continue;
-        if (w->isHidden() || (!w->m_isMapped && !w->m_fadingOut) || w->m_pinned)
+        // 0.56 snapshots a closing window into a Desktop::CWindowFadeout and drops it from the
+        // live list, so there is no m_fadingOut left to hold it in the overview: unmapped is gone.
+        if (w->isHidden() || !w->m_isMapped || w->m_pinned)
             continue;
         out.push_back(w);
     }
@@ -191,7 +197,7 @@ std::vector<HSColumn> HSView::columnsOf(PHLWORKSPACE workspace) {
     });
 
     for (const auto& w : windows) {
-        const double center = hs_window_render_pos(w).x - offset.x + w->m_realSize->value().x / 2.0;
+        const double center = hs_window_render_pos(w).x - offset.x + w->sizeAnimation()->value().x / 2.0;
 
         if (!columns.empty() && std::abs(columns.back().centerX - center) <= COLUMN_EPS) {
             columns.back().windows.push_back(w);
@@ -232,7 +238,7 @@ double HSView::anchorOffset(PHLWORKSPACE workspace) const {
         return 0.0;
 
     const CBox mbox = monitor->logicalBox();
-    const double center = hs_window_render_pos(anchor).x - hs_workspace_render_offset(workspace).x + anchor->m_realSize->value().x / 2.0;
+    const double center = hs_window_render_pos(anchor).x - hs_workspace_render_offset(workspace).x + anchor->sizeAnimation()->value().x / 2.0;
 
     return center - (mbox.x + mbox.w / 2.0);
 }
@@ -242,7 +248,7 @@ void HSView::applySelection(PHLWINDOW window) {
     if (!monitor)
         return;
 
-    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const auto ws = State::workspaceState()->query().id(m_selected).run();
 
     // Navigating the overview really navigates: the compositor follows along, so every keybind
     // the user already has -- close, move-to-workspace, swapcol -- acts on what they are looking
@@ -267,7 +273,7 @@ void HSView::applySelection(PHLWINDOW window) {
 }
 
 PHLWINDOW HSView::selectedAnchor() const {
-    return anchorWindow(g_pCompositor->getWorkspaceByID(m_selected));
+    return anchorWindow(State::workspaceState()->query().id(m_selected).run());
 }
 
 // The zoom at which every window on `workspace` is on screen while its anchor column stays
@@ -283,7 +289,7 @@ double HSView::requiredZoom(PHLWORKSPACE workspace, const CBox& monitorBox) cons
     for (const auto& w : workspaceWindows(workspace)) {
         const double x = hs_window_render_pos(w).x - offset.x;
         left = std::min(left, x);
-        right = std::max(right, x + w->m_realSize->value().x);
+        right = std::max(right, x + w->sizeAnimation()->value().x);
     }
 
     const double anchorX = monitorBox.x + monitorBox.w / 2.0 + anchorOffset(workspace);
@@ -317,7 +323,7 @@ void HSView::syncRow() {
 
     // Likewise for the horizontal anchor: retargeting every frame means a window closing or the
     // layout scrolling under us is absorbed by the same easing, instead of snapping.
-    const float anchorTarget = (float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected));
+    const float anchorTarget = (float)anchorOffset(State::workspaceState()->query().id(m_selected).run());
     if (std::abs(m_anchorX->goal() - anchorTarget) > 0.5F)
         *m_anchorX = anchorTarget;
 
@@ -325,14 +331,14 @@ void HSView::syncRow() {
 }
 
 void HSView::syncCenter(bool warp) {
-    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const auto ws = State::workspaceState()->query().id(m_selected).run();
     const auto anchor = anchorWindow(ws);
 
     m_centerValid = anchor != nullptr;
     if (!anchor)
         return;
 
-    const Vector2D size = anchor->m_realSize->value();
+    const Vector2D size = anchor->sizeAnimation()->value();
     const float centerY = (float)(hs_window_render_pos(anchor).y - hs_workspace_render_offset(ws).y + size.y / 2.0);
 
     if (warp) {
@@ -376,7 +382,7 @@ void HSView::updateFit(bool warp) {
         target = std::clamp(target, minZoom, configured);
     } else if (mode == 2) {
         // Re-fit for whichever workspace is selected. Varies as you move between rows.
-        target = std::clamp((float)requiredZoom(g_pCompositor->getWorkspaceByID(m_selected), mbox), minZoom, configured);
+        target = std::clamp((float)requiredZoom(State::workspaceState()->query().id(m_selected).run(), mbox), minZoom, configured);
     }
 
     if (HSConfig::value<Config::INTEGER>("fit_rows")) {
@@ -412,7 +418,7 @@ HSFrame HSView::frame() const {
     // down to make a new workspace" discoverable. Mirror that with a synthetic card.
     if (HSConfig::value<Config::INTEGER>("trailing_workspace") || (m_selected > maxId && m_selected != WORKSPACE_INVALID)) {
         const WORKSPACEID newId = std::max(maxId + 1, (WORKSPACEID)1);
-        if (!g_pCompositor->getWorkspaceByID(newId))
+        if (!State::workspaceState()->query().id(newId).run())
             f.cards.push_back({.id = newId, .workspace = nullptr, .index = (int)f.cards.size(), .synthetic = true});
     }
 
@@ -459,14 +465,14 @@ CBox HSView::windowBox(PHLWINDOW window, const HSCard& card, const HSFrame& f) c
         return {};
 
     const Vector2D srcOrigin = card.viewOrigin + hs_workspace_render_offset(card.workspace);
-    return CBox {(hs_window_render_pos(window) - srcOrigin) * f.zoom + card.contentOrigin, window->m_realSize->value() * f.zoom};
+    return CBox {(hs_window_render_pos(window) - srcOrigin) * f.zoom + card.contentOrigin, window->sizeAnimation()->value() * f.zoom};
 }
 
 CBox HSView::centerBox(const HSFrame& f) const {
     if (!m_centerValid || f.cards.empty())
         return {};
 
-    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const auto ws = State::workspaceState()->query().id(m_selected).run();
     const Vector2D size = m_centerSize->value() * f.zoom;
     if (size.x <= 0.0 || size.y <= 0.0)
         return {};
@@ -532,7 +538,7 @@ void HSView::show() {
 
     // Re-sync whenever we are not already showing, and also if the workspace we had selected
     // has since been destroyed under us.
-    const bool stale = !m_active || m_closing || (m_selected != WORKSPACE_INVALID && !g_pCompositor->getWorkspaceByID(m_selected));
+    const bool stale = !m_active || m_closing || (m_selected != WORKSPACE_INVALID && !State::workspaceState()->query().id(m_selected).run());
 
     m_active = true;
     m_closing = false;
@@ -540,7 +546,7 @@ void HSView::show() {
     if (stale) {
         syncSelectionToMonitor();
         m_pan->setValueAndWarp(0.F);
-        m_anchorX->setValueAndWarp((float)anchorOffset(g_pCompositor->getWorkspaceByID(m_selected)));
+        m_anchorX->setValueAndWarp((float)anchorOffset(State::workspaceState()->query().id(m_selected).run()));
         updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
         syncCenter(true);
@@ -553,10 +559,10 @@ void HSView::show() {
     *m_progress = 1.F;
     m_progress->setCallbackOnEnd(nullptr);
 
-    Cursor::overrideController->setOverride("left_ptr", Cursor::CURSOR_OVERRIDE_UNKNOWN);
+    Pointer::Cursor::overrideController->setOverride("left_ptr", Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
 
     g_pHyprRenderer->damageMonitor(monitor);
-    g_pCompositor->scheduleFrameForMonitor(monitor);
+    monitor->scheduleFrame();
 }
 
 void HSView::hide(PHLWINDOW focusWindow) {
@@ -564,9 +570,9 @@ void HSView::hide(PHLWINDOW focusWindow) {
     if (!monitor || !m_active)
         return;
 
-    PHLWORKSPACE target = g_pCompositor->getWorkspaceByID(m_selected);
+    PHLWORKSPACE target = State::workspaceState()->query().id(m_selected).run();
     if (!target && m_selected != WORKSPACE_INVALID)
-        target = g_pCompositor->createNewWorkspace(m_selected, monitor->m_id);
+        target = State::workspaceState()->create(m_selected, monitor->m_id);
 
     // Closing commits the column you scrolled to, not just the workspace: whatever ended up in
     // the centre is what you were pointing at. Navigation already moved the compositor along, so
@@ -597,10 +603,10 @@ void HSView::hide(PHLWINDOW focusWindow) {
         m_closing = false;
     }
 
-    Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_UNKNOWN);
+    Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
 
     g_pHyprRenderer->damageMonitor(monitor);
-    g_pCompositor->scheduleFrameForMonitor(monitor);
+    monitor->scheduleFrame();
 }
 
 void HSView::toggle() {
@@ -629,7 +635,7 @@ void HSView::selectWorkspace(WORKSPACEID id) {
     m_selected = id;
     m_pan->setValueAndWarp(0.F);
 
-    const auto ws = g_pCompositor->getWorkspaceByID(id);
+    const auto ws = State::workspaceState()->query().id(id).run();
     applySelection(anchorWindow(ws));
     m_anchorX->setValueAndWarp((float)anchorOffset(ws));
 
@@ -638,7 +644,7 @@ void HSView::selectWorkspace(WORKSPACEID id) {
 
     if (const auto monitor = this->monitor()) {
         g_pHyprRenderer->damageMonitor(monitor);
-        g_pCompositor->scheduleFrameForMonitor(monitor);
+        monitor->scheduleFrame();
     }
 }
 
@@ -654,7 +660,7 @@ void HSView::selectRow(int delta) {
 void HSView::selectColumn(int delta) {
     // Purely an overview-side move: it walks this workspace's own tape and re-anchors, so it
     // works on any row, not just whichever workspace the compositor happens to think is active.
-    const auto ws = g_pCompositor->getWorkspaceByID(m_selected);
+    const auto ws = State::workspaceState()->query().id(m_selected).run();
     if (!ws)
         return;
 
@@ -687,7 +693,7 @@ void HSView::selectColumn(int delta) {
 
     if (const auto monitor = this->monitor()) {
         g_pHyprRenderer->damageMonitor(monitor);
-        g_pCompositor->scheduleFrameForMonitor(monitor);
+        monitor->scheduleFrame();
     }
 }
 
@@ -696,7 +702,7 @@ void HSView::panBy(double dx) {
 
     if (const auto monitor = this->monitor()) {
         g_pHyprRenderer->damageMonitor(monitor);
-        g_pCompositor->scheduleFrameForMonitor(monitor);
+        monitor->scheduleFrame();
     }
 }
 
@@ -729,12 +735,12 @@ void HSView::endDrag(const Vector2D& cursor) {
 
     PHLWORKSPACE workspace = target->workspace;
     if (!workspace)
-        workspace = g_pCompositor->createNewWorkspace(target->id, monitor->m_id);
+        workspace = State::workspaceState()->create(target->id, monitor->m_id);
     if (!workspace)
         return;
 
     if (window->m_workspace != workspace)
-        g_pCompositor->moveWindowToWorkspaceSafe(window, workspace);
+        Desktop::globalWindowController()->moveWindowToWorkspace(window, workspace);
 
     // Dropping is also a choice of workspace and column: follow the window.
     m_selected = workspace->m_id;
@@ -837,7 +843,7 @@ void HSView::render() {
     // The window being dragged rides the cursor, above every card.
     if (const auto dragged = m_dragged.lock()) {
         const Vector2D cursor = g_pInputManager->getMouseCoordsInternal();
-        const CBox box {cursor + m_dragGrab, dragged->m_realSize->value() * f.zoom};
+        const CBox box {cursor + m_dragGrab, dragged->sizeAnimation()->value() * f.zoom};
         hs_render_window_at_box(dragged, monitor, time, box, true);
     }
 
@@ -848,7 +854,7 @@ void HSView::render() {
     // Nothing else damages the monitor while the overview is up, and renderWorkspace is skipped
     // entirely on an undamaged monitor -- so the animation would stall without this.
     g_pHyprRenderer->damageMonitor(monitor);
-    g_pCompositor->scheduleFrameForMonitor(monitor);
+    monitor->scheduleFrame();
 }
 
 void HSView::renderCard(const HSCard& card, const HSFrame& f, const Time::steady_tp& time) {
@@ -954,7 +960,7 @@ void HSView::renderLayers(const Time::steady_tp& time, bool top) {
     for (const auto& level : levels) {
         for (const auto& ref : monitor->m_layerSurfaceLayers[level]) {
             const auto ls = ref.lock();
-            if (ls && !ls->m_fadingOut)
+            if (ls)
                 hs_render_layer(ls, monitor, time, false);
         }
     }
@@ -965,14 +971,14 @@ void HSView::renderLayers(const Time::steady_tp& time, bool top) {
     for (const auto& lsl : monitor->m_layerSurfaceLayers) {
         for (const auto& ref : lsl) {
             const auto ls = ref.lock();
-            if (ls && !ls->m_fadingOut)
+            if (ls)
                 hs_render_layer(ls, monitor, time, true);
         }
     }
 
     // Pinned windows float above everything, on every workspace -- drawing them unscaled keeps
     // that promise and sidesteps renderWindow's pinned-window offset special case.
-    for (const auto& w : g_pCompositor->m_windows) {
+    for (const auto& w : Desktop::windowState()->windows()) {
         if (!w || !w->m_pinned || !w->m_isMapped || w->isHidden())
             continue;
         if (w->m_monitor != monitor)

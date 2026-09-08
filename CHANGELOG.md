@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Ported to Hyprland 0.56.x**, which is now the only supported series (`SUPPORTED_HYPRLAND` in
+  the Makefile). 0.56 moved `CMonitor` into `namespace Monitor`, so the mangled names for
+  `renderWindow` and `renderLayer` changed and the 0.55-built plugin failed to `dlopen` on
+  `undefined symbol: CMonitor::changeWorkspace`. A plugin that cannot load registers none of its
+  config values, so every `plugin:hyprscape:*` key then reads as an unknown config key --
+  `hyprctl plugin list` reporting "no plugins loaded" is the tell, since the load failure itself
+  is quiet (`debug:disable_logs` is on by default, the notification expires in five seconds, and
+  `updateConfigPlugins` will not retry until the plugin list changes).
+- Followed 0.56 in breaking up the `CCompositor` god-object: monitor and workspace lookups go
+  through `State::monitorState()` / `State::workspaceState()` queries, windows through
+  `Desktop::windowState()`, workspace moves through `Desktop::globalWindowController()`, and
+  `scheduleFrameForMonitor` is now `monitor->scheduleFrame()`. `g_pAnimationManager` became
+  `Animation::mgr()`, and the cursor shape override controller moved into `Pointer::Cursor`.
+- `m_realPosition` / `m_realSize` are protected in 0.56, so geometry reads go through the public
+  `positionAnimation()` / `sizeAnimation()` accessors.
+- A closing window is snapshotted into a `Desktop::CWindowFadeout` and dropped from the live
+  window list, so there is no `m_fadingOut` left to hold it in the overview: an unmapped window
+  is simply gone. Fading-out layer surfaces likewise no longer appear in `m_layerSurfaceLayers`.
+
 ## 0.2.0
 
 First release intended for other people to install.

@@ -22,7 +22,7 @@ void hs_render_layer(PHLLS layer, PHLMONITOR monitor, const Time::steady_tp& tim
 
 // Where Hyprland will actually draw `window` if left alone: real position plus the workspace's
 // slide offset plus the floating drag offset. Overview geometry has to be derived from this, not
-// from m_realPosition, or every window on a slid-out workspace lands a screenful off.
+// from positionAnimation() alone, or every window on a slid-out workspace lands a screenful off.
 Vector2D hs_window_render_pos(PHLWINDOW window);
 
 // The slide offset Hyprland has parked on a workspace. Folded into the card's srcOrigin so the

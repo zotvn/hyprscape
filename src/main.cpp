@@ -9,7 +9,7 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/macros.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
@@ -259,7 +259,7 @@ static uint32_t hook_is_solitary_blocked(void* thisptr, bool full) {
     if (!hs_manager || !hs_manager->anyRendering())
         return original(thisptr, full);
 
-    return CMonitor::SC_UNKNOWN;
+    return Monitor::CMonitor::SC_UNKNOWN;
 }
 
 //
@@ -385,11 +385,11 @@ static void init_hooks() {
     success = is_solitary_blocked_hook->hook() && success;
 
     // Called, not hooked: both are protected members we cannot reach through the header.
-    render_window = resolve("_ZN6Render13IHyprRenderer12renderWindowEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7CWindowEEENS3_I8CMonitorEERKNSt6chrono10time_pointINSA_3_V2"
-                            "12steady_clockENSA_8durationIlSt5ratioILl1ELl1000000000EEEEEEbNS_15eRenderPassModeEbb",
+    render_window = resolve("_ZN6Render13IHyprRenderer12renderWindowEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7CWindowEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10time_"
+                            "pointINSB_3_V212steady_clockENSB_8durationIlSt5ratioILl1ELl1000000000EEEEEEbNS_15eRenderPassModeEbb",
                             "renderWindow");
-    render_layer = resolve("_ZN6Render13IHyprRenderer11renderLayerEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS3_I8CMonitorEERKNSt6chrono10time_pointINSA_"
-                           "3_V212steady_clockENSA_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb",
+    render_layer = resolve("_ZN6Render13IHyprRenderer11renderLayerEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10"
+                           "time_pointINSB_3_V212steady_clockENSB_8durationIlSt5ratioILl1ELl1000000000EEEEEEbb",
                            "renderLayer");
 
     if (!success)
