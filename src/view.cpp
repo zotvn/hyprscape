@@ -322,6 +322,18 @@ void HSView::syncRow() {
     const float rowTarget = (float)rowIndexOf(m_selected, frame().cards);
     if (std::abs(m_row->goal() - rowTarget) > 0.001F)
         *m_row = rowTarget;
+    {
+        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+        if (gridCols > 1) {
+            const int idx = rowIndexOf(m_selected, frame().cards);
+            const float colTarget = (float)(idx % gridCols);
+            const float gridRowTarget = (float)(idx / gridCols);
+            if (std::abs(m_gridCol->goal() - colTarget) > 0.001F)
+                *m_gridCol = colTarget;
+            if (std::abs(m_gridRow->goal() - gridRowTarget) > 0.001F)
+                *m_gridRow = gridRowTarget;
+        }
+    }
 
     // Likewise for the horizontal anchor: retargeting every frame means a window closing or the
     // layout scrolling under us is absorbed by the same easing, instead of snapping.
@@ -427,36 +439,62 @@ HSFrame HSView::frame() const {
     if (f.cards.empty())
         return f;
 
-    const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
+        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
 
-    // niri: zoom = 1 - progress * (1 - configured), so progress 0 is a pixel-exact desktop and
-    // opening the overview is literally a zoom-out.
-    f.zoom = std::max(1.F - f.progress * (1.F - m_fitZoom->value()), 0.01F);
+    if (gridCols > 1) {
+        // ═══ GRID MODE ═══
+        const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
+        const int totalCards = (int)f.cards.size();
+        const int gridRows = (totalCards + gridCols - 1) / gridCols;
 
-    const float cardW = f.monitorBox.w * f.zoom;
-    const float cardH = f.monitorBox.h * f.zoom;
-    const float pitch = cardH + f.monitorBox.h * gapFactor * f.zoom;
+        const float cellW = f.monitorBox.w / (gridCols + (gridCols - 1) * gapFactor);
+        const float cellH = f.monitorBox.h / (gridRows + (gridRows - 1) * gapFactor);
+        const float pitchX = cellW * (1.F + gapFactor);
+        const float pitchY = cellH * (1.F + gapFactor);
 
-    const float baseX = f.monitorBox.x + (f.monitorBox.w - cardW) / 2.F;
-    const float baseY = f.monitorBox.y + (f.monitorBox.h - cardH) / 2.F;
-    const float row = m_row->value();
+        const float gridZoom = cellW / f.monitorBox.w;
+        f.zoom = std::max(1.F - f.progress * (1.F - gridZoom), 0.01F);
 
-    for (auto& c : f.cards) {
-        const float rowY = baseY + ((float)c.index - row) * pitch;
+        const float selCol = m_gridCol->value();
+        const float selRow = m_gridRow->value();
 
-        c.box = CBox {f.monitorBox.x, rowY, f.monitorBox.w, cardH};
-        c.contentOrigin = {baseX, rowY};
+        const float centerX = f.monitorBox.x + f.monitorBox.w / 2.F;
+        const float centerY = f.monitorBox.y + f.monitorBox.h / 2.F;
 
-        // Every row is anchored on its own column, so the centre of the screen is a fixed
-        // reference that the tapes slide through -- it is the tape that moves, never the centre.
-        // The selected row's offset is animated; the others read straight off their anchor.
-        // Fading the offset in with the progress keeps progress 0 an exact identity transform:
-        // there viewOrigin is the monitor origin, zoom is 1 and contentOrigin is baseX == mbox.x.
-        // The selected row eases toward its anchor; the others sit exactly on theirs, since
-        // nothing moves them.
-        double offset = c.id == m_selected ? (double)m_anchorX->value() + m_pan->value() : anchorOffset(c.workspace);
+        for (auto& c : f.cards) {
+            const float col = (float)(c.index % gridCols);
+            const float row = (float)(c.index / gridCols);
 
-        c.viewOrigin = {f.monitorBox.x + offset * f.progress, f.monitorBox.y};
+            const float x = centerX - cellW / 2.F + (col - selCol) * pitchX;
+            const float y = centerY - cellH / 2.F + (row - selRow) * pitchY;
+
+            c.box = CBox {x, y, cellW, cellH};
+            c.contentOrigin = {x, y};
+            c.viewOrigin = {f.monitorBox.x, f.monitorBox.y};
+        }
+    } else {
+        // ═══ ORIGINAL LINEAR MODE (без изменений) ═══
+        const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
+
+        f.zoom = std::max(1.F - f.progress * (1.F - m_fitZoom->value()), 0.01F);
+
+        const float cardW = f.monitorBox.w * f.zoom;
+        const float cardH = f.monitorBox.h * f.zoom;
+        const float pitch = cardH + f.monitorBox.h * gapFactor * f.zoom;
+
+        const float baseX = f.monitorBox.x + (f.monitorBox.w - cardW) / 2.F;
+        const float baseY = f.monitorBox.y + (f.monitorBox.h - cardH) / 2.F;
+        const float row = m_row->value();
+
+        for (auto& c : f.cards) {
+            const float rowY = baseY + ((float)c.index - row) * pitch;
+
+            c.box = CBox {f.monitorBox.x, rowY, f.monitorBox.w, cardH};
+            c.contentOrigin = {baseX, rowY};
+
+            double offset = c.id == m_selected ? (double)m_anchorX->value() + m_pan->value() : anchorOffset(c.workspace);
+            c.viewOrigin = {f.monitorBox.x + offset * f.progress, f.monitorBox.y};
+        }
     }
 
     return f;
@@ -551,6 +589,14 @@ void HSView::show() {
         m_anchorX->setValueAndWarp((float)anchorOffset(State::workspaceState()->query().id(m_selected).run()));
         updateFit(true);
         m_row->setValueAndWarp((float)rowIndexOf(m_selected, frame().cards));
+        {
+            const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+            if (gridCols > 1) {
+                const int idx = rowIndexOf(m_selected, frame().cards);
+                m_gridCol->setValueAndWarp((float)(idx % gridCols));
+                m_gridRow->setValueAndWarp((float)(idx / gridCols));
+            }
+        }
         syncCenter(true);
     }
 
@@ -643,7 +689,14 @@ void HSView::selectWorkspace(WORKSPACEID id) {
 
     updateFit(false);
     *m_row = (float)rowIndexOf(id, frame().cards);
-
+    {
+        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+        if (gridCols > 1) {
+            const int idx = rowIndexOf(id, frame().cards);
+            *m_gridCol = (float)(idx % gridCols);
+            *m_gridRow = (float)(idx / gridCols);
+        }
+    }
     if (const auto monitor = this->monitor()) {
         g_pHyprRenderer->damageMonitor(monitor);
         monitor->scheduleFrame();
@@ -655,47 +708,76 @@ void HSView::selectRow(int delta) {
     if (f.cards.empty())
         return;
 
-    const int idx = std::clamp(rowIndexOf(m_selected, f.cards) + delta, 0, (int)f.cards.size() - 1);
-    selectWorkspace(f.cards[idx].id);
+    const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+    const int idx = rowIndexOf(m_selected, f.cards);
+    int newIdx;
+
+    if (gridCols > 1) {
+        newIdx = idx + delta * gridCols;
+        if (newIdx < 0 || newIdx >= (int)f.cards.size())
+            return;
+    } else {
+        newIdx = std::clamp(idx + delta, 0, (int)f.cards.size() - 1);
+    }
+
+    selectWorkspace(f.cards[newIdx].id);
 }
 
 void HSView::selectColumn(int delta) {
-    // Purely an overview-side move: it walks this workspace's own tape and re-anchors, so it
-    // works on any row, not just whichever workspace the compositor happens to think is active.
-    const auto ws = State::workspaceState()->query().id(m_selected).run();
-    if (!ws)
-        return;
+    const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
 
-    const auto columns = columnsOf(ws);
-    if (columns.empty())
-        return;
+    if (gridCols > 1) {
+        const auto f = frame();
+        if (f.cards.empty())
+            return;
 
-    disarmHover();
+        const int idx = rowIndexOf(m_selected, f.cards);
+        const int col = idx % gridCols;
+        const int newCol = col + delta;
 
-    const auto anchor = anchorWindow(ws);
+        if (newCol < 0 || newCol >= gridCols)
+            return;
 
-    int idx = 0;
-    for (size_t i = 0; i < columns.size(); ++i) {
-        if (std::ranges::find(columns[i].windows, anchor) != columns[i].windows.end()) {
-            idx = (int)i;
-            break;
+        const int newIdx = idx + delta;
+        if (newIdx < 0 || newIdx >= (int)f.cards.size())
+            return;
+
+        selectWorkspace(f.cards[newIdx].id);
+    } else {
+        const auto ws = State::workspaceState()->query().id(m_selected).run();
+        if (!ws)
+            return;
+
+        const auto columns = columnsOf(ws);
+        if (columns.empty())
+            return;
+
+        disarmHover();
+
+        const auto anchor = anchorWindow(ws);
+
+        int idx = 0;
+        for (size_t i = 0; i < columns.size(); ++i) {
+            if (std::ranges::find(columns[i].windows, anchor) != columns[i].windows.end()) {
+                idx = (int)i;
+                break;
+            }
         }
-    }
 
-    idx = std::clamp(idx + delta, 0, (int)columns.size() - 1);
+        idx = std::clamp(idx + delta, 0, (int)columns.size() - 1);
 
-    // Within a stacked column, keep whichever window was last focused there.
-    const auto& target = columns[idx].windows;
-    const auto lastFocused = ws->getLastFocusedWindow();
-    const auto pick = std::ranges::find(target, lastFocused) != target.end() ? lastFocused : target.front();
+        const auto& target = columns[idx].windows;
+        const auto lastFocused = ws->getLastFocusedWindow();
+        const auto pick = std::ranges::find(target, lastFocused) != target.end() ? lastFocused : target.front();
 
-    m_pan->setValueAndWarp(0.F);
-    applySelection(pick);
-    updateFit(false);
+        m_pan->setValueAndWarp(0.F);
+        applySelection(pick);
+        updateFit(false);
 
-    if (const auto monitor = this->monitor()) {
-        g_pHyprRenderer->damageMonitor(monitor);
-        monitor->scheduleFrame();
+        if (const auto monitor = this->monitor()) {
+            g_pHyprRenderer->damageMonitor(monitor);
+            monitor->scheduleFrame();
+        }
     }
 }
 
@@ -749,6 +831,14 @@ void HSView::endDrag(const Vector2D& cursor) {
     applySelection(window);
     updateFit(false);
     *m_row = (float)rowIndexOf(m_selected, frame().cards);
+    {
+        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+        if (gridCols > 1) {
+            const int idx = rowIndexOf(m_selected, frame().cards);
+            *m_gridCol = (float)(idx % gridCols);
+            *m_gridRow = (float)(idx / gridCols);
+        }
+    }
 }
 
 void HSView::cancelDrag() {
