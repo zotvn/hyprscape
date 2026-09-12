@@ -422,6 +422,7 @@ static void add_dispatchers() {
 static void init_config() {
     // Geometry
     ADD_CONFIG(CFloatValue, "zoom", "how far to zoom out, as a fraction of the monitor (niri default 0.5)", 0.5F);
+    ADD_CONFIG(CIntValue, "grid_columns", "workspace columns in grid overview; 0 or 1 = linear tape", 1);
     ADD_CONFIG(CFloatValue, "workspace_gap", "vertical gap between workspaces, as a fraction of monitor height", 0.1F);
     ADD_CONFIG(CIntValue, "auto_fit", "0 = always use zoom; 1 = pick one zoom per session from the longest tape; 2 = re-fit per workspace", 1);
     ADD_CONFIG(CFloatValue, "min_zoom", "how far auto_fit is allowed to zoom out", 0.12F);
