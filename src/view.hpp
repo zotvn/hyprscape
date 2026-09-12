@@ -67,6 +67,8 @@ class HSView {
     PHLANIMVAR<float> m_progress; // 0 = desktop, 1 = fully zoomed out
     PHLANIMVAR<float> m_row;      // animated row index of the selected workspace
     PHLANIMVAR<float> m_pan;      // manual horizontal pan, in workspace pixels
+    PHLANIMVAR<float> m_gridRow;
+    PHLANIMVAR<float> m_gridCol;
     PHLANIMVAR<float> m_fitZoom;  // the zoom the overview settles at, fixed for the session
 
     // Where the selected row's anchor column sits relative to the centre. Its goal tracks the
