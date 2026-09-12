@@ -442,7 +442,7 @@ HSFrame HSView::frame() const {
     const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
 
     if (gridCols > 1) {
-        // ═══ STATIC GRID: все панели видны сразу ═══
+        // ═══ GRID MODE с zoom-into-selection ═══
         const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
         const int totalCards = (int)f.cards.size();
         const int gridRows = (totalCards + gridCols - 1) / gridCols;
@@ -453,23 +453,47 @@ HSFrame HSView::frame() const {
         const float pitchY = cellH * (1.F + gapFactor);
 
         const float gridZoom = cellW / f.monitorBox.w;
-        f.zoom = std::max(1.F - f.progress * (1.F - gridZoom), 0.01F);
 
-        // Центрируем всю сетку на мониторе
+        // Статичная сетка, центрированная на мониторе
         const float gridW = gridCols * pitchX - gapFactor * cellW;
         const float gridH = gridRows * pitchY - gapFactor * cellH;
         const float startX = f.monitorBox.x + (f.monitorBox.w - gridW) / 2.F;
         const float startY = f.monitorBox.y + (f.monitorBox.h - gridH) / 2.F;
 
+        // Центр ВЫБРАННОЙ карточки в статичной сетке
+        const int selIdx = rowIndexOf(m_selected, f.cards);
+        const float selCx = startX + (float)(selIdx % gridCols) * pitchX + cellW / 2.F;
+        const float selCy = startY + (float)(selIdx / gridCols) * pitchY + cellH / 2.F;
+
+        // Центр монитора
+        const float monCx = f.monitorBox.x + f.monitorBox.w / 2.F;
+        const float monCy = f.monitorBox.y + f.monitorBox.h / 2.F;
+
+        // Камера: cz=1 -> видна вся сетка, cz=fillScale -> зум в выбранную карточку.
+        // Привязано к progress, поэтому открытие/закрытие = плавный зум вокруг выбора.
+        const float fillScale = f.monitorBox.w / cellW;
+        const float cz = 1.F + (fillScale - 1.F) * (1.F - f.progress);
+        const Vector2D T { (monCx - selCx) * (1.F - f.progress), (monCy - selCy) * (1.F - f.progress) };
+
+        f.zoom = std::max(gridZoom * cz, 0.01F);
+
         for (auto& c : f.cards) {
             const float col = (float)(c.index % gridCols);
             const float row = (float)(c.index / gridCols);
 
-            // Фиксированная позиция: сетка не двигается, видны все карточки
-            const float x = startX + col * pitchX;
-            const float y = startY + row * pitchY;
+            const float cardCxGrid = startX + col * pitchX + cellW / 2.F;
+            const float cardCyGrid = startY + row * pitchY + cellH / 2.F;
 
-            c.box = CBox {x, y, cellW, cellH};
+            const float cardCx = selCx + (cardCxGrid - selCx) * cz + T.x;
+            const float cardCy = selCy + (cardCyGrid - selCy) * cz + T.y;
+
+            const float cardW = cellW * cz;
+            const float cardH = cellH * cz;
+
+            const float x = cardCx - cardW / 2.F;
+            const float y = cardCy - cardH / 2.F;
+
+            c.box = CBox {x, y, cardW, cardH};
             c.contentOrigin = {x, y};
             c.viewOrigin = {f.monitorBox.x, f.monitorBox.y};
         }
@@ -898,6 +922,8 @@ void HSView::render() {
     for (const auto& c : f.cards) {
         if (c.box.y + c.box.h < f.monitorBox.y - cullMargin || c.box.y > f.monitorBox.y + f.monitorBox.h + cullMargin)
             continue;
+        if (c.box.x + c.box.w < f.monitorBox.x - cullMargin || c.box.x > f.monitorBox.x + f.monitorBox.w + cullMargin)
+            continue;
         renderCard(c, f, time);
     }
 
@@ -906,7 +932,16 @@ void HSView::render() {
     // reference the tape slides through, so it must not travel in alongside the window it rings.
     const float activeBorder = HSConfig::value<Config::FLOAT>("active_border_size");
     if (activeBorder > 0.F && f.progress > 0.01F) {
-        const auto box = centerBox(f);
+        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+
+        CBox box;
+        if (gridCols > 1) {
+            const auto* card = f.card(m_selected);
+            box = card ? card->box : centerBox(f);   // вокруг всей карточки
+        } else {
+            box = centerBox(f);                       // линейный режим: вокруг окна
+        }
+
         if (box.w > 0 && box.h > 0) {
             CBorderPassElement::SBorderData border;
             border.box = snapToPixels(toBuffer(monitor, box));
