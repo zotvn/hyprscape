@@ -436,10 +436,10 @@ HSFrame HSView::frame() const {
             f.cards.push_back({.id = newId, .workspace = nullptr, .index = (int)f.cards.size(), .synthetic = true});
     }
 
-    if (f.cards.empty())
+    if (f.cards.empty()) {
         return f;
-
-        const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
+    }
+    const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
 
     if (gridCols > 1) {
         // ═══ GRID MODE ═══
