@@ -442,7 +442,7 @@ HSFrame HSView::frame() const {
     const int gridCols = HSConfig::value<Config::INTEGER>("grid_columns");
 
     if (gridCols > 1) {
-        // ═══ GRID MODE ═══
+        // ═══ STATIC GRID: все панели видны сразу ═══
         const float gapFactor = std::max(HSConfig::value<Config::FLOAT>("workspace_gap"), 0.F);
         const int totalCards = (int)f.cards.size();
         const int gridRows = (totalCards + gridCols - 1) / gridCols;
@@ -455,18 +455,19 @@ HSFrame HSView::frame() const {
         const float gridZoom = cellW / f.monitorBox.w;
         f.zoom = std::max(1.F - f.progress * (1.F - gridZoom), 0.01F);
 
-        const float selCol = m_gridCol->value();
-        const float selRow = m_gridRow->value();
-
-        const float centerX = f.monitorBox.x + f.monitorBox.w / 2.F;
-        const float centerY = f.monitorBox.y + f.monitorBox.h / 2.F;
+        // Центрируем всю сетку на мониторе
+        const float gridW = gridCols * pitchX - gapFactor * cellW;
+        const float gridH = gridRows * pitchY - gapFactor * cellH;
+        const float startX = f.monitorBox.x + (f.monitorBox.w - gridW) / 2.F;
+        const float startY = f.monitorBox.y + (f.monitorBox.h - gridH) / 2.F;
 
         for (auto& c : f.cards) {
             const float col = (float)(c.index % gridCols);
             const float row = (float)(c.index / gridCols);
 
-            const float x = centerX - cellW / 2.F + (col - selCol) * pitchX;
-            const float y = centerY - cellH / 2.F + (row - selRow) * pitchY;
+            // Фиксированная позиция: сетка не двигается, видны все карточки
+            const float x = startX + col * pitchX;
+            const float y = startY + row * pitchY;
 
             c.box = CBox {x, y, cellW, cellH};
             c.contentOrigin = {x, y};
