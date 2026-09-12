@@ -103,6 +103,8 @@ HSView::HSView(MONITORID monitorId) : m_monitorId(monitorId) {
     Animation::mgr()->createAnimation(0.F, m_progress, cfg, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(0.F, m_row, cfg, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(0.F, m_pan, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_gridCol, cfg, AVARDAMAGE_NONE);
+    Animation::mgr()->createAnimation(0.F, m_gridRow, cfg, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(1.F, m_fitZoom, cfg, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(0.F, m_anchorX, cfg, AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(0.F, m_centerY, cfg, AVARDAMAGE_NONE);
